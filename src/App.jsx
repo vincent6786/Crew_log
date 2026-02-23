@@ -52,7 +52,15 @@ function NavBar({ title, sub, onBack, right, c }) {
     </div>
   );
 }
-
+// ─── Shared UI primitives ───────────────────────────────────────────────────
+function Sect({ label, children, c }) {
+  return (
+    <div style={{marginBottom:18}}>
+      <div style={{fontSize:10,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:8}}>{label}</div>
+      {children}
+    </div>
+  );
+}
 // ─── QuickLogView as a PROPER React component ─────────────────────────────────
 // This is the key fix: extracting it as a component prevents keyboard collapse
 // because React preserves focus across parent re-renders.
@@ -109,7 +117,7 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
       />
       <div style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"16px 16px 40px",WebkitOverflowScrolling:"touch"}}>
 
-        <Sect label="組員 CREW MEMBER">
+        <Sect label="組員 CREW MEMBER" c={c}>
           <div style={{position:"relative"}}>
             <input
               value={form.crewTxt}
@@ -139,11 +147,11 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
           {form.crewId && <div style={{marginTop:5,fontSize:12,color:c.accent,fontWeight:600}}>✓ ID: {form.crewId}</div>}
         </Sect>
 
-        <Sect label="日期 DATE">
+        <Sect label="日期 DATE" c={c}>
           <input type="date" value={form.date} onChange={e => setForm(f => ({...f, date:e.target.value}))} style={inp}/>
         </Sect>
 
-        <Sect label="航班 FLIGHT">
+        <Sect label="航班 FLIGHT" c={c}>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
             {routes.map(r => (
               <button key={r.id}
@@ -177,7 +185,7 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
           </div>
         </Sect>
 
-        <Sect label="機型 AIRCRAFT">
+        <Sect label="機型 AIRCRAFT" c={c}>
           <div style={{display:"flex",gap:8}}>
             {AIRCRAFT.map(a => (
               <button key={a} onClick={() => setForm(f => ({...f, aircraft:f.aircraft===a?"":a}))}
@@ -188,7 +196,7 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
           </div>
         </Sect>
 
-        <Sect label="職位 POSITION">
+        <Sect label="職位 POSITION" c={c}>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
             {POSITIONS.map(p => (
               <button key={p} onClick={() => setForm(f => ({...f, position:f.position===p?"":p}))}
@@ -202,7 +210,7 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
 
         {!editFlightId && (
           <>
-            <Sect label="紅黃綠燈 STATUS">
+            <Sect label="紅黃綠燈 STATUS" c={c}>
               <div style={{display:"flex",gap:8}}>
                 {Object.entries(STATUS_MAP).map(([k,v]) => (
                   <button key={k} onClick={() => setForm(f => ({...f, status:f.status===k?null:k}))}
@@ -213,7 +221,7 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
                 ))}
               </div>
             </Sect>
-            <Sect label="標籤 TAGS">
+            <Sect label="標籤 TAGS" c={c}>
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 {PRESET_TAGS.map(t => (
                   <button key={t} onClick={() => setForm(f => ({...f, tags:f.tags.includes(t)?f.tags.filter(x=>x!==t):[...f.tags,t]}))}
@@ -226,7 +234,7 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
           </>
         )}
 
-        <Sect label="備忘 MEMO">
+        <Sect label="備忘 MEMO" c={c}>
           <textarea value={form.memo} onChange={e => setForm(f => ({...f, memo:e.target.value}))} rows={3}
             placeholder="這次飛行的備忘..." style={{...inp,resize:"vertical"}}/>
         </Sect>
