@@ -100,12 +100,6 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
 
   const inp = { background:c.input, border:`1px solid ${c.border}`, borderRadius:12, padding:"11px 14px", color:c.text, fontSize:14, fontFamily:"inherit", outline:"none", width:"100%" };
 
-  const Sect = ({ label, children }) => (
-    <div style={{marginBottom:18}}>
-      <div style={{fontSize:10,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:8}}>{label}</div>
-      {children}
-    </div>
-  );
 
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100vh",overflow:"hidden"}}>
@@ -559,7 +553,7 @@ export default function App() {
 
   const inp = { background:c.input, border:`1px solid ${c.border}`, borderRadius:12, padding:"11px 14px", color:c.text, fontSize:14, fontFamily:"inherit", outline:"none", width:"100%" };
 
-  const SyncBadge = () => {
+  const SyncBadge = ({ syncStatus, c }) => {
     const map = { loading:{icon:"⏳",color:c.sub}, synced:{icon:"☁️",color:"#30D158"}, error:{icon:"⚠️",color:"#FF453A"} };
     const s = map[syncStatus];
     return <span style={{fontSize:13,color:s.color}}>{s.icon}</span>;
