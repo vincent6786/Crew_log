@@ -61,6 +61,12 @@ function Sect({ label, children, c }) {
     </div>
   );
 }
+
+function SyncBadge({ syncStatus, c }) {
+  const map = { loading:{icon:"⏳",color:c.sub}, synced:{icon:"☁️",color:"#30D158"}, error:{icon:"⚠️",color:"#FF453A"} };
+  const s = map[syncStatus];
+  return <span style={{fontSize:13,color:s.color}}>{s.icon}</span>;
+}
 // ─── QuickLogView as a PROPER React component ─────────────────────────────────
 // This is the key fix: extracting it as a component prevents keyboard collapse
 // because React preserves focus across parent re-renders.
@@ -553,11 +559,6 @@ export default function App() {
 
   const inp = { background:c.input, border:`1px solid ${c.border}`, borderRadius:12, padding:"11px 14px", color:c.text, fontSize:14, fontFamily:"inherit", outline:"none", width:"100%" };
 
-  const SyncBadge = ({ syncStatus, c }) => {
-    const map = { loading:{icon:"⏳",color:c.sub}, synced:{icon:"☁️",color:"#30D158"}, error:{icon:"⚠️",color:"#FF453A"} };
-    const s = map[syncStatus];
-    return <span style={{fontSize:13,color:s.color}}>{s.icon}</span>;
-  };
 
   // ── Auth screens ─────────────────────────────────────────────────────────────
   if (authStep === "loading") return (
@@ -627,7 +628,7 @@ export default function App() {
             <div style={{fontSize:9,letterSpacing:4,color:c.accent,fontWeight:700,marginBottom:2}}>CREW LOG ✈ 空中生存指南</div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <div style={{fontSize:22,fontWeight:800,color:c.text}}>Dashboard</div>
-              <SyncBadge/>
+              <SyncBadge syncStatus={syncStatus} c={c}/>
             </div>
           </div>
           <div style={{display:"flex",gap:8}}>
