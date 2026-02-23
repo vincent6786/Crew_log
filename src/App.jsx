@@ -916,8 +916,7 @@ export default function App() {
   const gs = `
     @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Noto+Sans+JP:wght@300;400;500;700&display=swap');
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-    html,body{overflow-x:hidden;touch-action:pan-y;overscroll-behavior-x:none;}
-    body{background:${c.bg};}
+    html,body,#root{overflow-x:hidden;touch-action:pan-y;overscroll-behavior-x:none;background:${c.bg};min-height:100vh;min-height:100dvh;}
     input,textarea,button{font-family:'Syne','Noto Sans JP',sans-serif;}
     input::placeholder,textarea::placeholder{color:${c.sub};opacity:1;}
     ::-webkit-scrollbar{width:3px;height:3px;}
@@ -933,13 +932,16 @@ export default function App() {
 
   // ── Auth screens ──
   if (authStep === "loading") return (
-    <div style={{background:"#0B0C14",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <span style={{color:"#F5B731",fontSize:20,letterSpacing:4,fontFamily:"sans-serif"}}>✈ LOADING...</span>
-    </div>
+    <>
+      <style>{gs}</style>
+      <div style={{background:"#0B0C14",minHeight:"100vh",minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <span style={{color:"#F5B731",fontSize:20,letterSpacing:4,fontFamily:"'Syne',sans-serif"}}>✈ LOADING...</span>
+      </div>
+    </>
   );
 
   if (authStep === "passcode") return (
-    <div style={{background:c.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,overflowX:"hidden"}}>
+    <div style={{background:c.bg,minHeight:"100vh",minHeight:"100dvh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,overflowX:"hidden"}}>
       <style>{gs}</style>
       <div style={{width:"100%",maxWidth:360}}>
         <div style={{textAlign:"center",marginBottom:40}}>
@@ -962,7 +964,7 @@ export default function App() {
   );
 
   if (authStep === "username") return (
-    <div style={{background:c.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,overflowX:"hidden"}}>
+    <div style={{background:c.bg,minHeight:"100vh",minHeight:"100dvh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,overflowX:"hidden"}}>
       <style>{gs}</style>
       <div style={{width:"100%",maxWidth:360}}>
         <div style={{textAlign:"center",marginBottom:32}}>
@@ -984,10 +986,13 @@ export default function App() {
   );
 
   if (!ready) return (
-    <div style={{background:"#0B0C14",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}>
-      <span style={{color:"#F5B731",fontSize:20,letterSpacing:4,fontFamily:"sans-serif"}}>✈ LOADING...</span>
-      <span style={{color:"#6B7499",fontSize:12,letterSpacing:2}}>連接雲端資料庫...</span>
-    </div>
+    <>
+      <style>{gs}</style>
+      <div style={{background:"#0B0C14",minHeight:"100vh",minHeight:"100dvh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}>
+        <span style={{color:"#F5B731",fontSize:20,letterSpacing:4,fontFamily:"'Syne',sans-serif"}}>✈ LOADING...</span>
+        <span style={{color:"#6B7499",fontSize:12,letterSpacing:2}}>連接雲端資料庫...</span>
+      </div>
+    </>
   );
 
   // ── Dashboard (called as function, not component) ──
