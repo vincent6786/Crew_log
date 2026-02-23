@@ -1517,6 +1517,17 @@ export default function App() {
     setReady(false); setCrew([]); setFlights([]); setRoutes([]);
   };
 
+  const exportJSON = () => {
+    const data = { crew, flights, routes, exportedAt: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `crewlog-backup-${today()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  
   const patchCrew = (id,patch) => setCrew(cr=>cr.map(m=>m.id===id?{...m,...patch}:m));
   const flipTag   = (id,tag)   => setCrew(cr=>cr.map(m=>{
     if(m.id!==id) return m;
@@ -1986,6 +1997,7 @@ export default function App() {
         
         <div style={{flex:1,overflowY:"auto",padding:"14px 16px 32px"}}>
           <div style={{marginBottom:16}}>
+            <div style={{...}}>組員資料 CREW INFO / ✏ 編輯 button</div>
             <div style={{fontSize:9,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:8}}>標籤 TAGS</div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               {PRESET_TAGS.map(t=>(
