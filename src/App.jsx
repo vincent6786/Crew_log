@@ -1576,6 +1576,16 @@ export default function App() {
     if(crew.find(m=>m.id===newCrew.id.trim())){setAddCrewErr("此 ID 已存在");return;}
     setCrew(cr=>[...cr,{id:newCrew.id.trim(),name:newCrew.name.trim(),nickname:newCrew.nickname.trim(),seniority:newCrew.seniority.trim(),status:null,tags:[],notes:""}]);
     setNewCrew({id:"",name:"",nickname:"",seniority:""});
+    // ← ADD THIS BLOCK
+    const dupNick = crew.find(
+      m => m.nickname.toLowerCase() === newCrew.nickname.trim().toLowerCase()
+    );
+    if (dupNick) {
+      setAddCrewErr(`"${newCrew.nickname}" 已有同名組員 (${dupNick.name} · ${dupNick.seniority}) — Duplicate nickname, are you sure? 如確定請改 ID 區分`);
+      return;
+    }
+    setCrew(cr => [...cr, { ... }]);
+    
   };
   const exportJSON = () => {
     const blob=new Blob([JSON.stringify({crew,flights,routes,user:username,at:new Date().toISOString()},null,2)],{type:"application/json"});
