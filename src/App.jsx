@@ -1,4 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { db } from "./firebase";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
 
 const INITIAL_CREW = [
   { id: "2311860", name: "中村 江里佳", nickname: "Erika",  seniority: "23G", status: null, tags: [], notes: "" },
@@ -32,22 +34,8 @@ const today = () => new Date().toISOString().slice(0,10);
 const DARK = { bg:"#0B0C14", card:"#111320", cardAlt:"#181A28", border:"#232538", text:"#ECEDFA", sub:"#6B7499", accent:"#F5B731", adk:"#0B0C14", pill:"#1C1F32", input:"#181A28" };
 const LITE = { bg:"#EEEEF7", card:"#FFFFFF", cardAlt:"#F4F5FF", border:"#DDE0F0", text:"#0D0E1E", sub:"#6672A0", accent:"#C58C00", adk:"#FFFFFF", pill:"#E4E6F7", input:"#F0F1FA" };
 
-// ─── localStorage fallback (no window.storage in production) ───
-const store = {
-  get: async (key) => {
-    try {
-      if (window.storage) return window.storage.get(key);
-      const v = localStorage.getItem(key);
-      return v ? { value: v } : null;
-    } catch { return null; }
-  },
-  set: async (key, val) => {
-    try {
-      if (window.storage) return window.storage.set(key, val);
-      localStorage.setItem(key, val);
-    } catch {}
-  },
-};
+// Firestore document reference — all data lives in one doc
+const DATA_DOC = doc(db, "crewlog", "main");
 
 export default function App() {
   const [dark, setDark]         = useState(true);
@@ -57,11 +45,15 @@ export default function App() {
   const [ready, setReady]       = useState(false);
   const [view, setView]         = useState("dashboard");
   const [profileId, setProfileId] = useState(null);
+  const [syncStatus, setSyncStatus] = useState("loading"); // "loading" | "synced" | "error"
+
+  // Used to prevent write-loop: when Firestore pushes data in, we skip the outbound write
+  const isRemoteUpdate = useRef(false);
 
   // Dashboard
   const [search, setSearch]       = useState("");
   const [filterTag, setFilterTag] = useState(null);
-  const [sortMode, setSortMode]   = useState("alpha"); // alpha | recent
+  const [sortMode, setSortMode]   = useState("alpha");
 
   // QuickLog
   const EMPTY = { crewId:"", crewTxt:"", date:today(), flightNum:"", route:"", aircraft:"", position:"", memo:"", status:null, tags:[] };
@@ -69,7 +61,7 @@ export default function App() {
   const [sugg, setSugg]   = useState([]);
   const [addR, setAddR]   = useState(false);
   const [rf, setRf]       = useState({ num:"", route:"", ac:"" });
-  const [editFlightId, setEditFlightId] = useState(null); // for editing existing log
+  const [editFlightId, setEditFlightId] = useState(null);
 
   // Add Crew
   const [newCrew, setNewCrew] = useState({ id:"", name:"", nickname:"", seniority:"" });
@@ -78,29 +70,55 @@ export default function App() {
   // Profile
   const [editNotes, setEditNotes]   = useState(false);
   const [tempNotes, setTempNotes]   = useState("");
-  const [editFlight, setEditFlight] = useState(null); // { id, memo }
-  const [confirmDel, setConfirmDel] = useState(null); // flight id to confirm delete
+  const [confirmDel, setConfirmDel] = useState(null);
 
   const c = dark ? DARK : LITE;
 
-  // ── Storage ──────────────────────────────────────────────
+  // ── Firestore: real-time listener on mount ────────────────
   useEffect(() => {
-    (async () => {
-      try {
-        const cr = await store.get("cl4-crew");
-        const fl = await store.get("cl4-flights");
-        const ro = await store.get("cl4-routes");
-        setCrew(cr ? JSON.parse(cr.value) : INITIAL_CREW);
-        if (fl) setFlights(JSON.parse(fl.value));
-        if (ro) setRoutes(JSON.parse(ro.value));
-      } catch { setCrew(INITIAL_CREW); }
-      setReady(true);
-    })();
+    const unsub = onSnapshot(
+      DATA_DOC,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          isRemoteUpdate.current = true;
+          setCrew(data.crew    || INITIAL_CREW);
+          setFlights(data.flights || []);
+          setRoutes(data.routes   || []);
+        } else {
+          // First ever load — seed with initial crew, don't set isRemoteUpdate
+          setCrew(INITIAL_CREW);
+          setFlights([]);
+          setRoutes([]);
+        }
+        setSyncStatus("synced");
+        setReady(true);
+      },
+      (error) => {
+        console.error("Firestore error:", error);
+        setSyncStatus("error");
+        setReady(true);
+      }
+    );
+    return () => unsub();
   }, []);
 
-  useEffect(() => { if (ready) store.set("cl4-crew",    JSON.stringify(crew)   ); }, [crew,    ready]);
-  useEffect(() => { if (ready) store.set("cl4-flights", JSON.stringify(flights) ); }, [flights, ready]);
-  useEffect(() => { if (ready) store.set("cl4-routes",  JSON.stringify(routes)  ); }, [routes,  ready]);
+  // ── Firestore: write when local state changes ─────────────
+  useEffect(() => {
+    if (!ready) return;
+
+    // If this update came from Firestore, skip writing back (prevent loop)
+    if (isRemoteUpdate.current) {
+      isRemoteUpdate.current = false;
+      return;
+    }
+
+    setSyncStatus("synced");
+    setDoc(DATA_DOC, { crew, flights, routes }).catch((err) => {
+      console.error("Firestore write error:", err);
+      setSyncStatus("error");
+    });
+  }, [crew, flights, routes, ready]);
 
   // ── Helpers ───────────────────────────────────────────────
   const patchCrew = (id, patch) => setCrew(cr => cr.map(m => m.id === id ? { ...m, ...patch } : m));
@@ -109,11 +127,10 @@ export default function App() {
     return { ...m, tags: m.tags.includes(tag) ? m.tags.filter(t=>t!==tag) : [...m.tags, tag] };
   }));
 
-  const goProfile = (id) => { setProfileId(id); setEditNotes(false); setEditFlight(null); setConfirmDel(null); setView("profile"); };
+  const goProfile = (id) => { setProfileId(id); setEditNotes(false); setConfirmDel(null); setView("profile"); };
 
   const openQL = (id = null, flightToEdit = null) => {
     if (flightToEdit) {
-      // editing an existing flight log
       const m = crew.find(x=>x.id===flightToEdit.crewId);
       setForm({ crewId:flightToEdit.crewId, crewTxt:m?`${m.nickname} — ${m.name}`:"", date:flightToEdit.date, flightNum:flightToEdit.flightNum||"", route:flightToEdit.route||"", aircraft:flightToEdit.aircraft||"", position:flightToEdit.position||"", memo:flightToEdit.memo||"", status:null, tags:[] });
       setEditFlightId(flightToEdit.id);
@@ -239,9 +256,25 @@ export default function App() {
     </div>
   );
 
+  // ── Sync badge ────────────────────────────────────────────
+  const SyncBadge = () => {
+    const map = {
+      loading: { icon:"⏳", label:"連線中...", color:c.sub },
+      synced:  { icon:"☁️", label:"已同步",   color:"#30D158" },
+      error:   { icon:"⚠️", label:"離線",     color:"#FF453A" },
+    };
+    const s = map[syncStatus];
+    return (
+      <div style={{display:"flex",alignItems:"center",gap:4,fontSize:10,fontWeight:700,color:s.color,background:c.pill,borderRadius:8,padding:"4px 8px"}}>
+        <span>{s.icon}</span><span>{s.label}</span>
+      </div>
+    );
+  };
+
   if (!ready) return (
-    <div style={{background:"#0B0C14",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
+    <div style={{background:"#0B0C14",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}>
       <span style={{color:"#F5B731",fontSize:20,letterSpacing:4,fontFamily:"Syne,sans-serif"}}>✈ LOADING...</span>
+      <span style={{color:"#6B7499",fontSize:12,letterSpacing:2}}>連接雲端資料庫 Connecting to cloud...</span>
     </div>
   );
 
@@ -256,7 +289,8 @@ export default function App() {
             <div style={{fontSize:9,letterSpacing:4,color:c.accent,fontWeight:700,marginBottom:2}}>CREW LOG ✈ 空中生存指南</div>
             <div style={{fontSize:22,fontWeight:800,color:c.text}}>Dashboard</div>
           </div>
-          <div style={{display:"flex",gap:8}}>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <SyncBadge/>
             <button onClick={exportJSON} style={{background:c.pill,border:"none",color:c.sub,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>⬇ 備份</button>
             <button onClick={()=>setDark(d=>!d)} style={{background:c.pill,border:"none",color:c.sub,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:16}}>{dark?"☀":"🌙"}</button>
           </div>
@@ -307,7 +341,6 @@ export default function App() {
           {filtered.map(m=>{
             const si=m.status?STATUS_MAP[m.status]:null;
             const last=flights.filter(f=>f.crewId===m.id).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
-            // highlight if memo matched search
             const memoMatch = search.length>1 && flights.filter(f=>f.crewId===m.id).some(f=>(f.memo||"").toLowerCase().includes(search.toLowerCase()));
             return(
               <div key={m.id} onClick={()=>goProfile(m.id)} style={{background:si?si.bg:c.card,border:`1px solid ${si?si.border:c.border}`,borderRadius:14,padding:"12px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,outline:memoMatch?`2px solid ${c.accent}`:"none"}}>
@@ -549,7 +582,6 @@ export default function App() {
                         <span style={{fontWeight:700,color:c.text,fontSize:14}}>{f.flightNum||"—"}{f.route&&<span style={{color:c.sub,fontSize:12,fontWeight:400,marginLeft:8}}>{f.route}</span>}</span>
                         <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0,marginLeft:8}}>
                           <span style={{fontSize:11,color:c.sub}}>{f.date}</span>
-                          {/* Edit & Delete */}
                           <button onClick={()=>openQL(null,f)} style={{background:"none",border:"none",color:c.sub,cursor:"pointer",fontSize:13,padding:"0 2px"}}>✏</button>
                           {confirmDel===f.id
                             ?<div style={{display:"flex",gap:4}}>
