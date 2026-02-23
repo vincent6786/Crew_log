@@ -1963,41 +1963,38 @@ export default function App() {
             ))}
           </div>
         </div>
-        <div style={{marginTop:12}}>
-          <div style={{fontSize:9,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span>組員資料 CREW INFO</span>
-            <button onClick={()=>{
-              if(editCrewInfo){
-                if(tempCrewInfo.nickname.trim()) patchCrew(m.id, tempCrewInfo);
-                setEditCrewInfo(false);
-              } else {
-                setTempCrewInfo({name:m.name, nickname:m.nickname, seniority:m.seniority});
-                setEditCrewInfo(true);
-              }
-            }} style={{background:"none",border:"none",color:c.accent,fontSize:12,fontWeight:700,cursor:"pointer"}}>
-              {editCrewInfo?"💾 儲存":"✏ 編輯"}
-            </button>
-          </div>
-          {editCrewInfo ? (
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              <input value={tempCrewInfo.nickname} onChange={e=>setTempCrewInfo(t=>({...t,nickname:e.target.value}))}
-                placeholder="Nickname *" style={inp}/>
-              <input value={tempCrewInfo.name} onChange={e=>setTempCrewInfo(t=>({...t,name:e.target.value}))}
-                placeholder="姓名" style={inp}/>
-              <input value={tempCrewInfo.seniority} onChange={e=>setTempCrewInfo(t=>({...t,seniority:e.target.value}))}
-                placeholder="期別 e.g. 24G" style={inp}/>
-            </div>
-          ) : (
-            <div style={{background:c.cardAlt,border:`1px solid ${c.border}`,borderRadius:12,padding:"10px 14px",fontSize:13,color:c.sub,lineHeight:1.8}}>
-              <span style={{color:c.text,fontWeight:700}}>{m.nickname}</span> · {m.name}<br/>
-              期別 {m.seniority} · #{m.id}
-            </div>
-          )}
-        </div>
         
         <div style={{flex:1,overflowY:"auto",padding:"14px 16px 32px"}}>
           <div style={{marginBottom:16}}>
-            <div style={{...}}>組員資料 CREW INFO / ✏ 編輯 button</div>
+            <div style={{fontSize:9,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span>組員資料 CREW INFO</span>
+              <button onClick={()=>{
+                if(editCrewInfo){
+                  if(tempCrewInfo.nickname.trim()) patchCrew(m.id, tempCrewInfo);
+                  setEditCrewInfo(false);
+                } else {
+                  setTempCrewInfo({name:m.name, nickname:m.nickname, seniority:m.seniority});
+                  setEditCrewInfo(true);
+                }
+              }} style={{background:"none",border:"none",color:c.accent,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                {editCrewInfo?"💾 儲存":"✏ 編輯"}
+              </button>
+            </div>
+            {editCrewInfo ? (
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <input value={tempCrewInfo.nickname} onChange={e=>setTempCrewInfo(t=>({...t,nickname:e.target.value}))} placeholder="Nickname *" style={inp}/>
+                <input value={tempCrewInfo.name} onChange={e=>setTempCrewInfo(t=>({...t,name:e.target.value}))} placeholder="姓名" style={inp}/>
+                <input value={tempCrewInfo.seniority} onChange={e=>setTempCrewInfo(t=>({...t,seniority:e.target.value}))} placeholder="期別 e.g. 24G" style={inp}/>
+              </div>
+            ) : (
+              <div style={{background:c.cardAlt,border:`1px solid ${c.border}`,borderRadius:12,padding:"10px 14px",fontSize:13,color:c.sub,lineHeight:1.8}}>
+                <span style={{color:c.text,fontWeight:700}}>{m.nickname}</span> · {m.name}<br/>
+                期別 {m.seniority} · #{m.id}
+              </div>
+            )}
+          </div>
+          
+          <div style={{marginBottom:16}}>
             <div style={{fontSize:9,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:8}}>標籤 TAGS</div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               {PRESET_TAGS.map(t=>(
