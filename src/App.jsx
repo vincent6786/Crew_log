@@ -1448,6 +1448,8 @@ export default function App() {
 
   const [newCrew,    setNewCrew]    = useState({ id:"", name:"", nickname:"", seniority:"" });
   const [addCrewErr, setAddCrewErr] = useState("");
+  const [editCrewInfo, setEditCrewInfo] = useState(false);
+  const [tempCrewInfo, setTempCrewInfo] = useState({ name:"", nickname:"", seniority:"" });
 
   const [editNotes,   setEditNotes]   = useState(false);
   const [tempNotes,   setTempNotes]   = useState("");
@@ -1668,7 +1670,8 @@ export default function App() {
       <style>{gs}</style>
       <div style={{width:"100%",maxWidth:360}}>
         <div style={{textAlign:"center",marginBottom:40}}>
-          <div style={{fontSize:52,marginBottom:12}}>✈</div>
+          <img src="/logo.png" alt="CrewLog"
+            style={{width:80,height:80,objectFit:"contain",marginBottom:12,borderRadius:18}}/>
           <div style={{fontSize:9,letterSpacing:5,color:c.accent,fontWeight:700,marginBottom:6}}>CREW LOG</div>
           <div style={{fontSize:26,fontWeight:800,color:c.text,lineHeight:1.2}}>空中生存指南</div>
           <div style={{fontSize:13,color:c.sub,marginTop:8}}>Enter passcode to continue</div>
@@ -1949,7 +1952,38 @@ export default function App() {
             ))}
           </div>
         </div>
-
+        <div style={{marginTop:12}}>
+          <div style={{fontSize:9,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span>組員資料 CREW INFO</span>
+            <button onClick={()=>{
+              if(editCrewInfo){
+                if(tempCrewInfo.nickname.trim()) patchCrew(m.id, tempCrewInfo);
+                setEditCrewInfo(false);
+              } else {
+                setTempCrewInfo({name:m.name, nickname:m.nickname, seniority:m.seniority});
+                setEditCrewInfo(true);
+              }
+            }} style={{background:"none",border:"none",color:c.accent,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+              {editCrewInfo?"💾 儲存":"✏ 編輯"}
+            </button>
+          </div>
+          {editCrewInfo ? (
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              <input value={tempCrewInfo.nickname} onChange={e=>setTempCrewInfo(t=>({...t,nickname:e.target.value}))}
+                placeholder="Nickname *" style={inp}/>
+              <input value={tempCrewInfo.name} onChange={e=>setTempCrewInfo(t=>({...t,name:e.target.value}))}
+                placeholder="姓名" style={inp}/>
+              <input value={tempCrewInfo.seniority} onChange={e=>setTempCrewInfo(t=>({...t,seniority:e.target.value}))}
+                placeholder="期別 e.g. 24G" style={inp}/>
+            </div>
+          ) : (
+            <div style={{background:c.cardAlt,border:`1px solid ${c.border}`,borderRadius:12,padding:"10px 14px",fontSize:13,color:c.sub,lineHeight:1.8}}>
+              <span style={{color:c.text,fontWeight:700}}>{m.nickname}</span> · {m.name}<br/>
+              期別 {m.seniority} · #{m.id}
+            </div>
+          )}
+        </div>
+        
         <div style={{flex:1,overflowY:"auto",padding:"14px 16px 32px"}}>
           <div style={{marginBottom:16}}>
             <div style={{fontSize:9,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:8}}>標籤 TAGS</div>
@@ -2035,9 +2069,9 @@ export default function App() {
     <>
       <style>{gs}</style>
       <div style={{fontFamily:"'Syne','Noto Sans JP',sans-serif",background:c.bg,color:c.text,minHeight:"100vh",maxWidth:440,margin:"0 auto",boxShadow:"0 0 80px rgba(0,0,0,0.5)"}}>
-        {view==="dashboard"&&<DashView/>}
-        {view==="quicklog"&&<QLView/>}
-        {view==="profile"&&<ProfView/>}
+        {view==="dashboard" && DashView()}
+        {view==="quicklog"  && QLView()}
+        {view==="profile"   && ProfView()}
       </div>
     </>
   );
