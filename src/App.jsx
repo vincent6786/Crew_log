@@ -3,7 +3,7 @@ import { db } from "./firebase";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 
 // ─── CHANGE THIS to your own secret passcode ──────────────
-const APP_PASSCODE = "crew2025";
+const APP_PASSCODE = "crew2026";
 
 const INITIAL_CREW = [
   { id: "2311860", name: "中村 江里佳", nickname: "Erika",  seniority: "23G", status: null, tags: [], notes: "" },
