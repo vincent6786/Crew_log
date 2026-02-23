@@ -1,10 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { db } from "./firebase";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { INITIAL_CREW } from "./crewData";
 
 const APP_PASSCODE = "crew2026";
-
 
 const PRESET_TAGS = ["#好咖","#難搞","#細心","#新人","#好笑","#專業","#八卦","#準時"];
 const AIRCRAFT    = ["A321N","A330","A350"];
@@ -26,7 +25,7 @@ const flightDoc  = (u) => doc(db, "crewlog", `flights-${u}`);
 
 const EMPTY_FORM = { crewId:"", crewTxt:"", date:"", flightNum:"", route:"", aircraft:"", position:"", memo:"", status:null, tags:[] };
 
-// ─── Shared UI primitives (no App state needed) ───────────────────────────────
+// ─── Shared UI primitives ───────────────────────────────────────────────────
 function Dot({ status, sz=10, c }) {
   const col = status ? STATUS_MAP[status].color : c.border;
   return <span style={{display:"inline-block",width:sz,height:sz,borderRadius:"50%",background:col,flexShrink:0,boxShadow:status?`0 0 6px ${col}70`:0}}/>;
@@ -52,7 +51,7 @@ function NavBar({ title, sub, onBack, right, c }) {
     </div>
   );
 }
-// ─── Shared UI primitives ───────────────────────────────────────────────────
+
 function Sect({ label, children, c }) {
   return (
     <div style={{marginBottom:18}}>
@@ -67,16 +66,416 @@ function SyncBadge({ syncStatus, c }) {
   const s = map[syncStatus];
   return <span style={{fontSize:13,color:s.color}}>{s.icon}</span>;
 }
-// ─── QuickLogView as a PROPER React component ─────────────────────────────────
-// This is the key fix: extracting it as a component prevents keyboard collapse
-// because React preserves focus across parent re-renders.
-function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSave, onBack, dark, c, profileId }) {
+
+// ─── Settings Row helper ─────────────────────────────────────────────────────
+function SettingsRow({ icon, label, sub, onClick, right, c, danger }) {
+  return (
+    <div onClick={onClick}
+      style={{display:"flex",alignItems:"center",gap:12,padding:"13px 14px",background:c.card,border:`1px solid ${danger?"rgba(255,69,58,0.3)":c.border}`,borderRadius:14,cursor:onClick?"pointer":"default",marginBottom:8}}>
+      <span style={{fontSize:20,flexShrink:0,width:28,textAlign:"center"}}>{icon}</span>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:14,fontWeight:700,color:danger?"#FF453A":c.text}}>{label}</div>
+        {sub && <div style={{fontSize:11,color:c.sub,marginTop:1}}>{sub}</div>}
+      </div>
+      {right || (onClick && <span style={{color:c.sub,fontSize:16}}>›</span>)}
+    </div>
+  );
+}
+
+// ─── Stats View ──────────────────────────────────────────────────────────────
+function StatsView({ crew, flights, onBack, c }) {
+  const totalFlights = flights.length;
+  const uniqueCrew = [...new Set(flights.map(f => f.crewId))].length;
+  const uniqueRoutes = [...new Set(flights.filter(f => f.route).map(f => f.route))].length;
+
+  // Most flown crew
+  const crewCount = {};
+  flights.forEach(f => { crewCount[f.crewId] = (crewCount[f.crewId]||0) + 1; });
+  const topCrew = Object.entries(crewCount)
+    .sort((a,b) => b[1]-a[1])
+    .slice(0, 5)
+    .map(([id, count]) => {
+      const m = crew.find(x => x.id === id);
+      return { id, count, name: m ? m.nickname : id, fullName: m ? m.name : "" };
+    });
+
+  // Most flown routes
+  const routeCount = {};
+  flights.forEach(f => { if (f.route) routeCount[f.route] = (routeCount[f.route]||0) + 1; });
+  const topRoutes = Object.entries(routeCount).sort((a,b) => b[1]-a[1]).slice(0, 5);
+
+  // Most used aircraft
+  const acCount = {};
+  flights.forEach(f => { if (f.aircraft) acCount[f.aircraft] = (acCount[f.aircraft]||0) + 1; });
+  const topAc = Object.entries(acCount).sort((a,b) => b[1]-a[1]);
+
+  // Flights by month
+  const monthCount = {};
+  flights.forEach(f => { if (f.date) { const m = f.date.slice(0,7); monthCount[m] = (monthCount[m]||0) + 1; } });
+  const months = Object.entries(monthCount).sort((a,b) => b[0].localeCompare(a[0])).slice(0, 6);
+
+  // Status breakdown
+  const statusCount = { green:0, yellow:0, red:0, none:0 };
+  crew.forEach(m => { statusCount[m.status || "none"]++; });
+
+  const StatCard = ({ icon, value, label }) => (
+    <div style={{background:c.cardAlt,border:`1px solid ${c.border}`,borderRadius:14,padding:"14px 12px",textAlign:"center",flex:1}}>
+      <div style={{fontSize:22,marginBottom:4}}>{icon}</div>
+      <div style={{fontSize:24,fontWeight:800,color:c.accent}}>{value}</div>
+      <div style={{fontSize:10,color:c.sub,letterSpacing:1,fontWeight:600,marginTop:2}}>{label}</div>
+    </div>
+  );
+
+  const Bar = ({ label, count, max }) => (
+    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+      <span style={{fontSize:13,fontWeight:700,color:c.text,minWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{label}</span>
+      <div style={{flex:1,height:20,background:c.pill,borderRadius:8,overflow:"hidden"}}>
+        <div style={{height:"100%",width:`${max?Math.round(count/max*100):0}%`,background:`${c.accent}99`,borderRadius:8,minWidth:count?24:0,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:6}}>
+          <span style={{fontSize:10,fontWeight:700,color:c.adk}}>{count}</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100vh",overflow:"hidden"}}>
+      <NavBar sub="STATISTICS" title="飛行統計 📊" onBack={onBack} c={c}/>
+      <div style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"16px 16px 40px",WebkitOverflowScrolling:"touch"}}>
+
+        {/* Overview cards */}
+        <div style={{display:"flex",gap:10,marginBottom:20}}>
+          <StatCard icon="✈" value={totalFlights} label="FLIGHTS"/>
+          <StatCard icon="👥" value={uniqueCrew} label="CREW"/>
+          <StatCard icon="🗺" value={uniqueRoutes} label="ROUTES"/>
+        </div>
+
+        {totalFlights === 0 ? (
+          <div style={{textAlign:"center",color:c.sub,fontSize:14,padding:"40px 0"}}>
+            尚無紀錄，開始新增飛行吧！<br/>No flights logged yet.
+          </div>
+        ) : (
+          <>
+            {/* Top Crew */}
+            {topCrew.length > 0 && (
+              <Sect label="最常合飛 TOP CREW" c={c}>
+                <div style={{background:c.card,border:`1px solid ${c.border}`,borderRadius:14,padding:14}}>
+                  {topCrew.map((t,i) => (
+                    <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:i<topCrew.length-1?`1px solid ${c.border}`:"none"}}>
+                      <span style={{fontSize:16,fontWeight:800,color:i===0?c.accent:c.sub,width:24,textAlign:"center"}}>{i+1}</span>
+                      <div style={{flex:1}}>
+                        <span style={{fontWeight:700,color:c.text}}>{t.name}</span>
+                        <span style={{color:c.sub,fontSize:12,marginLeft:8}}>{t.fullName}</span>
+                      </div>
+                      <span style={{fontWeight:800,color:c.accent,fontSize:15}}>{t.count}</span>
+                      <span style={{fontSize:10,color:c.sub}}>次</span>
+                    </div>
+                  ))}
+                </div>
+              </Sect>
+            )}
+
+            {/* Top Routes */}
+            {topRoutes.length > 0 && (
+              <Sect label="熱門航線 TOP ROUTES" c={c}>
+                <div style={{background:c.card,border:`1px solid ${c.border}`,borderRadius:14,padding:14}}>
+                  {topRoutes.map(([route, count]) => (
+                    <Bar key={route} label={route} count={count} max={topRoutes[0][1]}/>
+                  ))}
+                </div>
+              </Sect>
+            )}
+
+            {/* Aircraft */}
+            {topAc.length > 0 && (
+              <Sect label="機型統計 AIRCRAFT" c={c}>
+                <div style={{display:"flex",gap:8}}>
+                  {topAc.map(([ac, count]) => (
+                    <div key={ac} style={{flex:1,background:c.card,border:`1px solid ${c.border}`,borderRadius:14,padding:"12px 8px",textAlign:"center"}}>
+                      <div style={{fontSize:16,fontWeight:800,color:c.text}}>{ac}</div>
+                      <div style={{fontSize:22,fontWeight:800,color:c.accent,marginTop:4}}>{count}</div>
+                      <div style={{fontSize:10,color:c.sub}}>次</div>
+                    </div>
+                  ))}
+                </div>
+              </Sect>
+            )}
+
+            {/* Monthly */}
+            {months.length > 0 && (
+              <Sect label="月份紀錄 BY MONTH" c={c}>
+                <div style={{background:c.card,border:`1px solid ${c.border}`,borderRadius:14,padding:14}}>
+                  {months.map(([month, count]) => (
+                    <Bar key={month} label={month} count={count} max={months[0][1]}/>
+                  ))}
+                </div>
+              </Sect>
+            )}
+
+            {/* Status breakdown */}
+            <Sect label="組員燈號分佈 STATUS" c={c}>
+              <div style={{display:"flex",gap:8}}>
+                {Object.entries(STATUS_MAP).map(([k,v]) => (
+                  <div key={k} style={{flex:1,background:v.bg,border:`1px solid ${v.border}`,borderRadius:14,padding:"12px 8px",textAlign:"center"}}>
+                    <div style={{fontSize:20}}>{v.emoji}</div>
+                    <div style={{fontSize:20,fontWeight:800,color:v.color,marginTop:4}}>{statusCount[k]}</div>
+                  </div>
+                ))}
+                <div style={{flex:1,background:c.cardAlt,border:`1px solid ${c.border}`,borderRadius:14,padding:"12px 8px",textAlign:"center"}}>
+                  <div style={{fontSize:20}}>⚪</div>
+                  <div style={{fontSize:20,fontWeight:800,color:c.sub,marginTop:4}}>{statusCount.none}</div>
+                </div>
+              </div>
+            </Sect>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Settings View ───────────────────────────────────────────────────────────
+function SettingsView({
+  onBack, c, dark, setDark, username, onLogout, onExport, onGoGuide, onGoStats,
+  defaultAircraft, setDefaultAircraft, defaultPosition, setDefaultPosition,
+  customTags, setCustomTags, onImport, routes, setRoutes, flights,
+}) {
+  const [newTag, setNewTag] = useState("");
+  const [addTagErr, setAddTagErr] = useState("");
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [nameEdit, setNameEdit] = useState(false);
+  const [tempName, setTempName] = useState(username);
+  const [nameErr, setNameErr] = useState("");
+  const [importMsg, setImportMsg] = useState("");
+  const [editRoutes, setEditRoutes] = useState(false);
+  const fileRef = useRef(null);
+
+  const inp = { background:c.input, border:`1px solid ${c.border}`, borderRadius:12, padding:"11px 14px", color:c.text, fontSize:14, fontFamily:"inherit", outline:"none", width:"100%" };
+
+  const allTags = [...PRESET_TAGS, ...customTags];
+
+  const handleImportFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        onImport(data);
+        setImportMsg("✅ 匯入成功 Import successful!");
+      } catch {
+        setImportMsg("❌ 檔案格式錯誤 Invalid JSON file");
+      }
+      setTimeout(() => setImportMsg(""), 3000);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  const handleNameSave = () => {
+    const name = tempName.trim();
+    if (!name) { setNameErr("請輸入名字"); return; }
+    if (name.length > 20) { setNameErr("名字太長了"); return; }
+    localStorage.setItem("cl-username", name);
+    // We need to reload to switch flight docs
+    window.location.reload();
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100vh",overflow:"hidden"}}>
+      <NavBar sub="SETTINGS" title="設定 ⚙" onBack={onBack} c={c}/>
+      <div style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"16px 16px 40px",WebkitOverflowScrolling:"touch"}}>
+
+        {/* Account */}
+        <Sect label="帳號 ACCOUNT" c={c}>
+          <div style={{background:c.card,border:`1px solid ${c.border}`,borderRadius:14,padding:14}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:nameEdit?12:0}}>
+              <span style={{fontSize:22}}>👤</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:16,fontWeight:800,color:c.text}}>{username}</div>
+                <div style={{fontSize:11,color:c.sub}}>{flights.length} 筆私人飛行紀錄</div>
+              </div>
+              <button onClick={()=>{setNameEdit(!nameEdit);setTempName(username);setNameErr("");}}
+                style={{background:c.pill,border:"none",color:c.accent,borderRadius:8,padding:"6px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                {nameEdit ? "取消" : "✏ 改名"}
+              </button>
+            </div>
+            {nameEdit && (
+              <div>
+                <input value={tempName} onChange={e=>setTempName(e.target.value)} placeholder="新名字..."
+                  autoComplete="off" style={{...inp,marginBottom:nameErr?6:10,fontSize:14}}/>
+                {nameErr && <div style={{color:"#FF453A",fontSize:11,marginBottom:6}}>{nameErr}</div>}
+                <div style={{fontSize:10,color:"#FF453A",marginBottom:8}}>⚠ 改名後會重新載入，新的飛行紀錄會存在新名字下</div>
+                <button onClick={handleNameSave}
+                  style={{width:"100%",background:c.accent,color:c.adk,border:"none",borderRadius:10,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                  💾 儲存新名字
+                </button>
+              </div>
+            )}
+          </div>
+        </Sect>
+
+        {/* Quick Actions */}
+        <Sect label="快速操作 QUICK ACTIONS" c={c}>
+          <SettingsRow icon="📊" label="飛行統計 Stats" sub="查看你的飛行數據摘要" onClick={onGoStats} c={c}/>
+          <SettingsRow icon="❓" label="使用說明 Guide" sub="如何使用 CrewLog" onClick={onGoGuide} c={c}/>
+          <SettingsRow icon="🌙" label="深色模式 Dark Mode" sub={dark?"目前：深色":"目前：淺色"} c={c}
+            right={
+              <button onClick={()=>setDark(d=>!d)}
+                style={{background:dark?c.accent:c.pill,color:dark?c.adk:c.sub,border:"none",borderRadius:20,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                {dark ? "☀ 淺色" : "🌙 深色"}
+              </button>
+            }
+          />
+        </Sect>
+
+        {/* Defaults */}
+        <Sect label="預設值 DEFAULTS" c={c}>
+          <div style={{background:c.card,border:`1px solid ${c.border}`,borderRadius:14,padding:14,marginBottom:8}}>
+            <div style={{fontSize:12,fontWeight:700,color:c.text,marginBottom:8}}>✈ 預設機型 Default Aircraft</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setDefaultAircraft("")}
+                style={{background:!defaultAircraft?c.accent:c.pill,color:!defaultAircraft?c.adk:c.sub,border:"none",borderRadius:10,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                無 None
+              </button>
+              {AIRCRAFT.map(a => (
+                <button key={a} onClick={()=>setDefaultAircraft(defaultAircraft===a?"":a)}
+                  style={{flex:1,background:defaultAircraft===a?c.accent:c.pill,color:defaultAircraft===a?c.adk:c.sub,border:"none",borderRadius:10,padding:"8px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                  {a}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{background:c.card,border:`1px solid ${c.border}`,borderRadius:14,padding:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:c.text,marginBottom:8}}>💺 預設職位 Default Position</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+              <button onClick={()=>setDefaultPosition("")}
+                style={{background:!defaultPosition?c.accent:c.pill,color:!defaultPosition?c.adk:c.sub,border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                無 None
+              </button>
+              {POSITIONS.map(p => (
+                <button key={p} onClick={()=>setDefaultPosition(defaultPosition===p?"":p)}
+                  style={{background:defaultPosition===p?c.accent:c.pill,color:defaultPosition===p?c.adk:c.sub,border:"none",borderRadius:8,padding:"6px 10px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+        </Sect>
+
+        {/* Custom Tags */}
+        <Sect label="自訂標籤 CUSTOM TAGS" c={c}>
+          <div style={{background:c.card,border:`1px solid ${c.border}`,borderRadius:14,padding:14}}>
+            <div style={{fontSize:11,color:c.sub,marginBottom:10}}>內建標籤不可刪除，自訂標籤可新增刪除</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+              {PRESET_TAGS.map(t => (
+                <span key={t} style={{background:c.pill,color:c.sub,borderRadius:20,padding:"5px 12px",fontSize:12,fontWeight:600}}>
+                  {t} <span style={{fontSize:9,opacity:0.5}}>🔒</span>
+                </span>
+              ))}
+              {customTags.map(t => (
+                <span key={t} style={{background:c.accent+"22",color:c.accent,borderRadius:20,padding:"5px 8px 5px 12px",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",gap:4}}>
+                  {t}
+                  <button onClick={()=>setCustomTags(ct=>ct.filter(x=>x!==t))}
+                    style={{background:"none",border:"none",color:"#FF453A",fontSize:14,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button>
+                </span>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <input value={newTag} onChange={e=>setNewTag(e.target.value)}
+                placeholder="#自訂標籤..." autoComplete="off"
+                onKeyDown={e=>{if(e.key==="Enter"){
+                  const tag = newTag.trim().startsWith("#") ? newTag.trim() : `#${newTag.trim()}`;
+                  if(!tag||tag==="#"){return;}
+                  if(allTags.includes(tag)){setAddTagErr("此標籤已存在");return;}
+                  setCustomTags(ct=>[...ct,tag]);setNewTag("");setAddTagErr("");
+                }}}
+                style={{...inp,flex:1,fontSize:13,padding:"9px 12px"}}/>
+              <button onClick={()=>{
+                const tag = newTag.trim().startsWith("#") ? newTag.trim() : `#${newTag.trim()}`;
+                if(!tag||tag==="#"){return;}
+                if(allTags.includes(tag)){setAddTagErr("此標籤已存在");return;}
+                setCustomTags(ct=>[...ct,tag]);setNewTag("");setAddTagErr("");
+              }} style={{background:c.accent,color:c.adk,border:"none",borderRadius:10,padding:"9px 16px",fontSize:13,fontWeight:700,cursor:"pointer",flexShrink:0}}>
+                + 新增
+              </button>
+            </div>
+            {addTagErr && <div style={{color:"#FF453A",fontSize:11,marginTop:6}}>{addTagErr}</div>}
+          </div>
+        </Sect>
+
+        {/* Saved Routes */}
+        <Sect label="已存航班 SAVED ROUTES" c={c}>
+          <div style={{background:c.card,border:`1px solid ${c.border}`,borderRadius:14,padding:14}}>
+            {routes.length === 0 ? (
+              <div style={{color:c.sub,fontSize:13,textAlign:"center",padding:"8px 0"}}>尚無已存航班<br/>No saved routes</div>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {routes.map(r => (
+                  <div key={r.id} style={{display:"flex",alignItems:"center",gap:8,background:c.cardAlt,borderRadius:10,padding:"8px 10px"}}>
+                    <span style={{fontWeight:700,color:c.text,fontSize:13}}>{r.flightNum}</span>
+                    {r.route && <span style={{color:c.sub,fontSize:12}}>{r.route}</span>}
+                    {r.aircraft && <span style={{background:c.pill,color:c.accent,borderRadius:6,padding:"2px 6px",fontSize:10,fontWeight:700}}>{r.aircraft}</span>}
+                    <button onClick={()=>setRoutes(rs=>rs.filter(x=>x.id!==r.id))}
+                      style={{marginLeft:"auto",background:"none",border:"none",color:"#FF453A",cursor:"pointer",fontSize:14,padding:"0 4px"}}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Sect>
+
+        {/* Data Management */}
+        <Sect label="資料管理 DATA" c={c}>
+          <SettingsRow icon="⬇" label="備份資料 Backup" sub="下載 JSON 備份檔" onClick={onExport} c={c}/>
+          <SettingsRow icon="📤" label="匯入備份 Import" sub="從 JSON 檔案還原資料" onClick={()=>fileRef.current?.click()} c={c}/>
+          <input ref={fileRef} type="file" accept=".json" onChange={handleImportFile} style={{display:"none"}}/>
+          {importMsg && (
+            <div style={{background:importMsg.startsWith("✅")?`rgba(48,209,88,0.1)`:"rgba(255,69,58,0.1)",
+              border:`1px solid ${importMsg.startsWith("✅")?"rgba(48,209,88,0.4)":"rgba(255,69,58,0.4)"}`,
+              borderRadius:10,padding:"8px 12px",fontSize:13,fontWeight:600,color:importMsg.startsWith("✅")?"#30D158":"#FF453A",marginBottom:8}}>
+              {importMsg}
+            </div>
+          )}
+        </Sect>
+
+        {/* Danger */}
+        <Sect label="危險區域 DANGER ZONE" c={c}>
+          {confirmClear ? (
+            <div style={{background:"rgba(255,69,58,0.1)",border:"1px solid rgba(255,69,58,0.4)",borderRadius:14,padding:16}}>
+              <div style={{fontSize:14,fontWeight:700,color:"#FF453A",marginBottom:6}}>確定要清除所有飛行紀錄？</div>
+              <div style={{fontSize:12,color:c.sub,marginBottom:12}}>This will delete ALL your private flight logs. Shared crew data will NOT be affected.<br/>⚠ Cannot be undone.</div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>{onImport({flights:[]});setConfirmClear(false);}}
+                  style={{flex:1,background:"#FF453A",color:"#fff",border:"none",borderRadius:10,padding:"11px",fontSize:13,fontWeight:800,cursor:"pointer"}}>確認清除</button>
+                <button onClick={()=>setConfirmClear(false)}
+                  style={{flex:1,background:c.pill,color:c.sub,border:"none",borderRadius:10,padding:"11px",fontSize:13,cursor:"pointer"}}>取消</button>
+              </div>
+            </div>
+          ) : (
+            <SettingsRow icon="🗑" label="清除飛行紀錄 Clear Logs" sub="刪除所有私人飛行紀錄" onClick={()=>setConfirmClear(true)} c={c} danger/>
+          )}
+          <div style={{marginTop:4}}>
+            <SettingsRow icon="🚪" label="登出 Logout" sub={`目前登入：${username}`} onClick={onLogout} c={c} danger/>
+          </div>
+        </Sect>
+
+        {/* About */}
+        <div style={{textAlign:"center",padding:"16px 0 4px",color:c.sub,fontSize:11,lineHeight:1.8}}>
+          CrewLog v2.0 · Built with ✈ & ❤<br/>
+          <span style={{color:c.accent,fontWeight:700}}>Your logs are safe & private.</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── QuickLogView ────────────────────────────────────────────────────────────
+function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSave, onBack, dark, c, profileId, allTags }) {
   const [form, setForm] = useState(initialForm);
   const [sugg, setSugg] = useState([]);
   const [addR, setAddR] = useState(false);
   const [rf,   setRf]   = useState({ num:"", route:"", ac:"" });
 
-  // Sync if parent changes initialForm (e.g. switching from add to edit)
   const prevEdit = useRef(editFlightId);
   useEffect(() => {
     if (prevEdit.current !== editFlightId) {
@@ -105,7 +504,7 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
   };
 
   const inp = { background:c.input, border:`1px solid ${c.border}`, borderRadius:12, padding:"11px 14px", color:c.text, fontSize:14, fontFamily:"inherit", outline:"none", width:"100%" };
-
+  const tagsToShow = allTags || PRESET_TAGS;
 
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100vh",overflow:"hidden"}}>
@@ -223,7 +622,7 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
             </Sect>
             <Sect label="標籤 TAGS" c={c}>
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {PRESET_TAGS.map(t => (
+                {tagsToShow.map(t => (
                   <button key={t} onClick={() => setForm(f => ({...f, tags:f.tags.includes(t)?f.tags.filter(x=>x!==t):[...f.tags,t]}))}
                     style={{background:form.tags.includes(t)?c.accent:c.pill,color:form.tags.includes(t)?c.adk:c.sub,border:"none",borderRadius:20,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                     {t}
@@ -251,82 +650,33 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
 // ─── GuideView ────────────────────────────────────────────────────────────────
 function GuideView({ onBack, c }) {
   const sections = [
-    {
-      emoji: "✈",
-      title: "什麼是 CrewLog？",
-      en: "What is CrewLog?",
-      content: "CrewLog 是你的私人空中生存指南。記錄合飛組員，留下備忘，用紅黃綠燈標記好壞，幫助你下次飛行前做好心理準備。\n\nCrewLog is your private cabin crew companion — log who you fly with, leave notes, and mark them green, yellow, or red so you're never caught off-guard again."
-    },
-    {
-      emoji: "🔒",
-      title: "隱私設計",
-      en: "Privacy",
-      content: "飛行紀錄 (備忘、航班) 是完全私人的 — 只有你看得到，不會同步給其他用戶。\n\n組員的基本資料 (名字、期別) 和紅黃綠燈、標籤則是大家共享的，讓整個 app 的資料保持最新。\n\nYour flight logs and memos are private (only you see them). Crew info, status lights, and tags are shared so everyone benefits."
-    },
-    {
-      emoji: "🔴🟡🟢",
-      title: "紅黃綠燈",
-      en: "Status Lights",
-      content: [
-        { icon: "🟢", label: "推薦 Great!", desc: "好合作、專業、值得信任的組員" },
-        { icon: "🟡", label: "普通 Neutral", desc: "一般，沒有特別好或壞" },
-        { icon: "🔴", label: "注意 Warning", desc: "需要注意，可搭配備忘說明原因" },
-      ],
-      isList: true
-    },
-    {
-      emoji: "🏷",
-      title: "標籤 Tags",
-      en: "Tags",
-      content: [
-        { icon: "#好咖", desc: "優秀的組員，合作愉快" },
-        { icon: "#難搞", desc: "不好合作，注意一下" },
-        { icon: "#細心", desc: "工作細心，注意到小細節" },
-        { icon: "#新人", desc: "新組員，需要多幫忙" },
-        { icon: "#好笑", desc: "幽默風趣，飛起來很開心" },
-        { icon: "#專業", desc: "工作態度專業" },
-        { icon: "#八卦", desc: "愛說話，要注意嘴型 👀" },
-        { icon: "#準時", desc: "很守時，不拖拖拉拉" },
-      ],
-      isList: true
-    },
-    {
-      emoji: "📝",
-      title: "如何新增飛行紀錄",
-      en: "How to Log a Flight",
-      content: "1. 點右下角的 ＋ 按鈕，或點組員卡片上的 ＋\n2. 搜尋組員名字、ID 或 Nickname\n3. 選擇日期、航班、機型、職位\n4. 設定紅黃綠燈和標籤（只有第一次紀錄才會更新組員狀態）\n5. 寫下備忘，然後儲存！\n\nHit + → search crew → fill in details → save. Easy."
-    },
-    {
-      emoji: "🔍",
-      title: "搜尋功能",
-      en: "Search",
-      content: "搜尋欄可以搜尋：\n• 組員 ID (員工號碼)\n• 中文姓名\n• 英文 Nickname\n• 飛行備忘的內容 (輸入兩個字以上)\n\n有備忘符合的組員會顯示 📝 提示。\n\nSearch by ID, Chinese name, nickname, or even memo content (2+ chars)."
-    },
-    {
-      emoji: "👤",
-      title: "組員頁面",
-      en: "Crew Profile",
-      content: "點任何組員可以進入個人頁面：\n• 查看你們所有的合飛紀錄\n• 編輯組員基本資料（大家共享）\n• 新增長期筆記（大家共享）\n• 快速設定紅黃綠燈\n• 編輯或刪除個別飛行紀錄\n\nTap any crew member to see your flight history with them, edit info, and manage notes."
-    },
-    {
-      emoji: "⬇",
-      title: "備份資料",
-      en: "Backup",
-      content: "Dashboard 右上角的「備份」按鈕可以將所有資料下載成 JSON 檔案。建議定期備份，以防萬一。\n\nTap 'Backup ⬇' on the dashboard to download all your data as a JSON file."
-    },
+    { emoji:"✈", title:"什麼是 CrewLog？", en:"What is CrewLog?",
+      content:"CrewLog 是你的私人空中生存指南。記錄合飛組員，留下備忘，用紅黃綠燈標記好壞，幫助你下次飛行前做好心理準備。\n\nCrewLog is your private cabin crew companion — log who you fly with, leave notes, and mark them green, yellow, or red so you're never caught off-guard again." },
+    { emoji:"🔒", title:"隱私設計", en:"Privacy",
+      content:"飛行紀錄 (備忘、航班) 是完全私人的 — 只有你看得到，不會同步給其他用戶。\n\n組員的基本資料 (名字、期別) 和紅黃綠燈、標籤則是大家共享的，讓整個 app 的資料保持最新。\n\nYour flight logs and memos are private (only you see them). Crew info, status lights, and tags are shared so everyone benefits." },
+    { emoji:"🔴🟡🟢", title:"紅黃綠燈", en:"Status Lights", isList:true,
+      content:[ { icon:"🟢", label:"推薦 Great!", desc:"好合作、專業、值得信任的組員" }, { icon:"🟡", label:"普通 Neutral", desc:"一般，沒有特別好或壞" }, { icon:"🔴", label:"注意 Warning", desc:"需要注意，可搭配備忘說明原因" } ] },
+    { emoji:"🏷", title:"標籤 Tags", en:"Tags", isList:true,
+      content:[ { icon:"#好咖", desc:"優秀的組員，合作愉快" }, { icon:"#難搞", desc:"不好合作，注意一下" }, { icon:"#細心", desc:"工作細心，注意到小細節" }, { icon:"#新人", desc:"新組員，需要多幫忙" }, { icon:"#好笑", desc:"幽默風趣，飛起來很開心" }, { icon:"#專業", desc:"工作態度專業" }, { icon:"#八卦", desc:"愛說話，要注意嘴型 👀" }, { icon:"#準時", desc:"很守時，不拖拖拉拉" } ] },
+    { emoji:"📝", title:"如何新增飛行紀錄", en:"How to Log a Flight",
+      content:"1. 點右下角的 ＋ 按鈕，或點組員卡片上的 ＋\n2. 搜尋組員名字、ID 或 Nickname\n3. 選擇日期、航班、機型、職位\n4. 設定紅黃綠燈和標籤\n5. 寫下備忘，然後儲存！\n\nHit + → search crew → fill in details → save. Easy." },
+    { emoji:"🔍", title:"搜尋功能", en:"Search",
+      content:"搜尋欄可以搜尋：\n• 組員 ID (員工號碼)\n• 中文姓名\n• 英文 Nickname\n• 飛行備忘的內容 (輸入兩個字以上)\n\n有備忘符合的組員會顯示 📝 提示。" },
+    { emoji:"👤", title:"組員頁面", en:"Crew Profile",
+      content:"點任何組員可以進入個人頁面：\n• 查看你們所有的合飛紀錄\n• 編輯組員基本資料（大家共享）\n• 新增長期筆記（大家共享）\n• 快速設定紅黃綠燈\n• 編輯或刪除個別飛行紀錄" },
+    { emoji:"⬇", title:"備份資料", en:"Backup",
+      content:"設定頁面的「備份」可以將所有資料下載成 JSON 檔案。建議定期備份，以防萬一。\n\nGo to Settings → Backup to download all your data as a JSON file." },
   ];
 
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100vh",overflow:"hidden"}}>
       <NavBar sub="USER GUIDE" title="使用說明 ✈" onBack={onBack} c={c}/>
       <div style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"16px 16px 40px",WebkitOverflowScrolling:"touch"}}>
-        {/* Hero */}
         <div style={{background:`linear-gradient(135deg, ${c.accent}22, ${c.accent}08)`,border:`1px solid ${c.accent}44`,borderRadius:20,padding:"20px 16px",marginBottom:20,textAlign:"center"}}>
           <div style={{fontSize:36,marginBottom:8}}>✈</div>
           <div style={{fontSize:20,fontWeight:800,color:c.text,marginBottom:4}}>空中生存指南</div>
           <div style={{fontSize:13,color:c.sub,lineHeight:1.6}}>記錄每一次合飛 · 留住每一個細節<br/>Log every flight · Remember every detail</div>
         </div>
-
         {sections.map((s, i) => (
           <div key={i} style={{background:c.card,border:`1px solid ${c.border}`,borderRadius:16,padding:"14px 16px",marginBottom:12}}>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
@@ -350,9 +700,8 @@ function GuideView({ onBack, c }) {
             )}
           </div>
         ))}
-
         <div style={{textAlign:"center",padding:"20px 0 4px",color:c.sub,fontSize:11,lineHeight:1.8}}>
-          CrewLog · Built with ✈ & ❤<br/>
+          CrewLog v2.0 · Built with ✈ & ❤<br/>
           <span style={{color:c.accent,fontWeight:700}}>Your logs are safe & private.</span>
         </div>
       </div>
@@ -362,13 +711,16 @@ function GuideView({ onBack, c }) {
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [dark, setDark] = useState(true);
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem("cl-dark");
+    return saved !== null ? saved === "true" : true;
+  });
   const [authStep, setAuthStep]           = useState("loading");
-  const [username, setUsername]           = useState("");
-  const [passcodeInput, setPasscodeInput] = useState("");
-  const [passcodeErr, setPasscodeErr]     = useState("");
-  const [usernameInput, setUsernameInput] = useState("");
-  const [usernameErr, setUsernameErr]     = useState("");
+  const [username, setUsername]            = useState("");
+  const [passcodeInput, setPasscodeInput]  = useState("");
+  const [passcodeErr, setPasscodeErr]      = useState("");
+  const [usernameInput, setUsernameInput]  = useState("");
+  const [usernameErr, setUsernameErr]      = useState("");
 
   const [crew,    setCrew]    = useState([]);
   const [routes,  setRoutes]  = useState([]);
@@ -378,7 +730,6 @@ export default function App() {
   const [view,      setView]        = useState("dashboard");
   const [profileId, setProfileId]   = useState(null);
 
-  // QuickLog state (passed to QuickLogView)
   const [qlInitialForm,   setQlInitialForm]   = useState({ ...EMPTY_FORM, date: today() });
   const [qlEditFlightId,  setQlEditFlightId]  = useState(null);
 
@@ -399,7 +750,21 @@ export default function App() {
   const [confirmDel, setConfirmDel] = useState(null);
   const [confirmDelCrew, setConfirmDelCrew] = useState(false);
 
+  // ── New settings state ──
+  const [customTags, setCustomTags] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cl-customTags") || "[]"); } catch { return []; }
+  });
+  const [defaultAircraft, setDefaultAircraft] = useState(() => localStorage.getItem("cl-defaultAC") || "");
+  const [defaultPosition, setDefaultPosition] = useState(() => localStorage.getItem("cl-defaultPos") || "");
+
+  const allTags = [...PRESET_TAGS, ...customTags];
   const c = dark ? DARK : LITE;
+
+  // Persist settings to localStorage
+  useEffect(() => { localStorage.setItem("cl-dark", String(dark)); }, [dark]);
+  useEffect(() => { localStorage.setItem("cl-customTags", JSON.stringify(customTags)); }, [customTags]);
+  useEffect(() => { localStorage.setItem("cl-defaultAC", defaultAircraft); }, [defaultAircraft]);
+  useEffect(() => { localStorage.setItem("cl-defaultPos", defaultPosition); }, [defaultPosition]);
 
   useEffect(() => {
     const saved = localStorage.getItem("cl-username");
@@ -463,13 +828,20 @@ export default function App() {
   };
 
   const exportJSON = () => {
-    const data = { crew, flights, routes, exportedAt: new Date().toISOString() };
+    const data = { crew, flights, routes, customTags, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement("a");
     a.href = url; a.download = `crewlog-backup-${today()}.json`; a.click();
     URL.revokeObjectURL(url);
   };
+
+  const handleImport = useCallback((data) => {
+    if (data.crew && Array.isArray(data.crew)) setCrew(data.crew);
+    if (data.routes && Array.isArray(data.routes)) setRoutes(data.routes);
+    if (Array.isArray(data.flights)) setFlights(data.flights);
+    if (Array.isArray(data.customTags)) setCustomTags(data.customTags);
+  }, []);
 
   const patchCrew = (id, patch) => setCrew(cr => cr.map(m => m.id===id ? {...m,...patch} : m));
   const flipTag   = (id, tag)   => setCrew(cr => cr.map(m => {
@@ -495,7 +867,7 @@ export default function App() {
       setQlInitialForm({ crewId:flightToEdit.crewId, crewTxt:m?`${m.nickname} — ${m.name}`:"", date:flightToEdit.date, flightNum:flightToEdit.flightNum||"", route:flightToEdit.route||"", aircraft:flightToEdit.aircraft||"", position:flightToEdit.position||"", memo:flightToEdit.memo||"", status:null, tags:[] });
       setQlEditFlightId(flightToEdit.id);
     } else {
-      const f = { ...EMPTY_FORM, date: today() };
+      const f = { ...EMPTY_FORM, date: today(), aircraft: defaultAircraft, position: defaultPosition };
       if (crewId) {
         const m = crew.find(x => x.id === crewId);
         if (m) { f.crewId=m.id; f.crewTxt=`${m.nickname} — ${m.name}`; f.status=m.status; f.tags=[...m.tags]; }
@@ -559,8 +931,7 @@ export default function App() {
 
   const inp = { background:c.input, border:`1px solid ${c.border}`, borderRadius:12, padding:"11px 14px", color:c.text, fontSize:14, fontFamily:"inherit", outline:"none", width:"100%" };
 
-
-  // ── Auth screens ─────────────────────────────────────────────────────────────
+  // ── Auth screens ──
   if (authStep === "loading") return (
     <div style={{background:"#0B0C14",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
       <span style={{color:"#F5B731",fontSize:20,letterSpacing:4,fontFamily:"sans-serif"}}>✈ LOADING...</span>
@@ -619,7 +990,7 @@ export default function App() {
     </div>
   );
 
-  // ── Dashboard ─────────────────────────────────────────────────────────────────
+  // ── Dashboard (called as function, not component) ──
   const DashView = () => (
     <div style={{display:"flex",flexDirection:"column",height:"100vh",overflow:"hidden"}}>
       <div style={{padding:"18px 16px 12px",background:c.card,borderBottom:`1px solid ${c.border}`,flexShrink:0}}>
@@ -631,19 +1002,17 @@ export default function App() {
               <SyncBadge syncStatus={syncStatus} c={c}/>
             </div>
           </div>
-          <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>setView("guide")} style={{background:c.pill,border:"none",color:c.sub,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>❓ 說明</button>
-            <button onClick={exportJSON} style={{background:c.pill,border:"none",color:c.sub,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>⬇ 備份</button>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
             <button onClick={()=>setDark(d=>!d)} style={{background:c.pill,border:"none",color:c.sub,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:16}}>{dark?"☀":"🌙"}</button>
+            <button onClick={()=>setView("settings")} style={{background:c.pill,border:"none",color:c.sub,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:16}}>⚙</button>
           </div>
         </div>
         <div style={{background:c.pill,borderRadius:12,padding:"8px 12px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:14}}>👤</span>
             <span style={{fontSize:13,fontWeight:700,color:c.text}}>{username}</span>
-            <span style={{fontSize:11,color:c.sub}}>· {flights.length} 筆私人記錄</span>
+            <span style={{fontSize:11,color:c.sub}}>· {flights.length} 筆</span>
           </div>
-          <button onClick={logout} style={{background:"none",border:"none",color:c.sub,fontSize:11,cursor:"pointer",fontFamily:"inherit",padding:"2px 6px"}}>登出</button>
         </div>
         <div style={{position:"relative"}}>
           <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:c.sub}}>🔍</span>
@@ -655,7 +1024,7 @@ export default function App() {
       <div style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"14px 16px 80px",WebkitOverflowScrolling:"touch"}}>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16,alignItems:"center"}}>
           <Tag on={!filterTag} onClick={()=>setFilterTag(null)} c={c}>ALL</Tag>
-          {PRESET_TAGS.map(t => <Tag key={t} on={filterTag===t} onClick={()=>setFilterTag(filterTag===t?null:t)} c={c}>{t}</Tag>)}
+          {allTags.map(t => <Tag key={t} on={filterTag===t} onClick={()=>setFilterTag(filterTag===t?null:t)} c={c}>{t}</Tag>)}
           <div style={{marginLeft:"auto",display:"flex",gap:4}}>
             <button onClick={()=>setSortMode("alpha")} style={{background:sortMode==="alpha"?c.accent:c.pill,color:sortMode==="alpha"?c.adk:c.sub,border:"none",borderRadius:10,padding:"5px 9px",fontSize:11,fontWeight:700,cursor:"pointer"}}>A–Z</button>
             <button onClick={()=>setSortMode("recent")} style={{background:sortMode==="recent"?c.accent:c.pill,color:sortMode==="recent"?c.adk:c.sub,border:"none",borderRadius:10,padding:"5px 9px",fontSize:11,fontWeight:700,cursor:"pointer"}}>最近</button>
@@ -665,7 +1034,6 @@ export default function App() {
         {recentIds.length > 0 && !search && !filterTag && (
           <div style={{marginBottom:20}}>
             <div style={{fontSize:9,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:8}}>我的最近合飛 MY RECENT</div>
-            {/* horizontal scroll container with touch-action pan-x so it doesn't conflict */}
             <div style={{display:"flex",gap:10,overflowX:"auto",paddingBottom:8,touchAction:"pan-x",WebkitOverflowScrolling:"touch"}}>
               {recentIds.map(id => {
                 const m = crew.find(x => x.id===id); if (!m) return null;
@@ -758,7 +1126,7 @@ export default function App() {
     </div>
   );
 
-  // ── Profile View ─────────────────────────────────────────────────────────────
+  // ── Profile View ──
   const ProfView = () => {
     if (!pMember) return null;
     const m = pMember;
@@ -791,7 +1159,6 @@ export default function App() {
         </div>
 
         <div style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"14px 16px 32px",WebkitOverflowScrolling:"touch"}}>
-          {/* Crew info */}
           <div style={{marginBottom:16}}>
             <div style={{fontSize:9,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <span>組員資料 CREW INFO</span>
@@ -816,11 +1183,10 @@ export default function App() {
             )}
           </div>
 
-          {/* Tags */}
           <div style={{marginBottom:16}}>
             <div style={{fontSize:9,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:8}}>標籤 TAGS</div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {PRESET_TAGS.map(t => (
+              {allTags.map(t => (
                 <button key={t} onClick={()=>flipTag(m.id,t)}
                   style={{background:m.tags.includes(t)?c.accent:c.pill,color:m.tags.includes(t)?c.adk:c.sub,border:"none",borderRadius:20,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                   {t}
@@ -829,7 +1195,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Notes */}
           <div style={{marginBottom:16}}>
             <div style={{fontSize:9,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <span>長期筆記 NOTES</span>
@@ -844,7 +1209,6 @@ export default function App() {
             }
           </div>
 
-          {/* Flight history */}
           <div>
             <div style={{fontSize:9,letterSpacing:3,color:c.sub,fontWeight:700,marginBottom:14}}>
               我的合飛紀錄 MY HISTORY ({pFlights.length}) <span style={{fontWeight:400,fontSize:8}}>🔒 only you</span>
@@ -885,7 +1249,6 @@ export default function App() {
             }
           </div>
 
-          {/* Danger zone */}
           <div style={{marginTop:32,borderTop:`1px solid ${c.border}`,paddingTop:20}}>
             <div style={{fontSize:9,letterSpacing:3,color:"#FF453A",fontWeight:700,marginBottom:10}}>危險區域 DANGER ZONE</div>
             {confirmDelCrew
@@ -908,7 +1271,7 @@ export default function App() {
     );
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  // ── Render ──
   return (
     <>
       <style>{gs}</style>
@@ -926,10 +1289,35 @@ export default function App() {
             dark={dark}
             c={c}
             profileId={profileId}
+            allTags={allTags}
           />
         )}
         {view === "profile"   && ProfView()}
-        {view === "guide"     && <GuideView onBack={() => setView("dashboard")} c={c}/>}
+        {view === "guide"     && <GuideView onBack={() => setView("settings")} c={c}/>}
+        {view === "stats"     && <StatsView crew={crew} flights={flights} onBack={() => setView("settings")} c={c}/>}
+        {view === "settings"  && (
+          <SettingsView
+            onBack={() => setView("dashboard")}
+            c={c}
+            dark={dark}
+            setDark={setDark}
+            username={username}
+            onLogout={logout}
+            onExport={exportJSON}
+            onGoGuide={() => setView("guide")}
+            onGoStats={() => setView("stats")}
+            defaultAircraft={defaultAircraft}
+            setDefaultAircraft={setDefaultAircraft}
+            defaultPosition={defaultPosition}
+            setDefaultPosition={setDefaultPosition}
+            customTags={customTags}
+            setCustomTags={setCustomTags}
+            onImport={handleImport}
+            routes={routes}
+            setRoutes={setRoutes}
+            flights={flights}
+          />
+        )}
       </div>
     </>
   );
