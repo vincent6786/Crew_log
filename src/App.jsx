@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { db } from "./firebase";
 import { doc, onSnapshot, setDoc, deleteDoc } from "firebase/firestore";
 
-const APP_PASSCODE = "crew2025"; // ← Change this to your own passcode
+const APP_PASSCODE = "crew2026"; // ← Change this to your own passcode
 
 const INITIAL_CREW = [
   { id: "1902634", name: "王太乙", nickname: "Kelly", seniority: "19A", status: null, tags: [], notes: "" },
