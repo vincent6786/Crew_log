@@ -910,7 +910,7 @@ export default function App() {
     <>
       <style>{gs}</style>
       <div style={{fontFamily:"'Syne','Noto Sans JP',sans-serif",background:c.bg,color:c.text,minHeight:"100vh",maxWidth:440,margin:"0 auto",boxShadow:"0 0 80px rgba(0,0,0,0.5)",overflowX:"hidden",touchAction:"pan-y"}}>
-        {view === "dashboard" && <DashView/>}
+        {view === "dashboard" && DashView()}
         {view === "quicklog"  && (
           <QuickLogView
             crew={crew}
@@ -925,7 +925,7 @@ export default function App() {
             profileId={profileId}
           />
         )}
-        {view === "profile"   && <ProfView/>}
+        {view === "profile"   && ProfView()}
         {view === "guide"     && <GuideView onBack={() => setView("dashboard")} c={c}/>}
       </div>
     </>
