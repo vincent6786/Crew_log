@@ -170,7 +170,7 @@ padding: 0;
 html, body, #root {
 overflow-x: hidden;
 touch-action: pan-y;
-overscroll-behavior-x: none;
+overscroll-behavior: none;
 background: ${c.bg};
 min-height: 100vh;
 min-height: 100dvh;
@@ -178,6 +178,15 @@ min-height: 100dvh;
 
 input, textarea, button {
 font-family: ‘Syne’, ‘Noto Sans JP’, sans-serif;
+}
+
+/* Prevent iOS Safari from zooming in when an input is focused.
+Safari zooms whenever the focused element’s font-size < 16 px.
+Setting font-size:16px here and using transform to visually scale
+back down is the safest cross-browser fix.                        */
+input, textarea, select {
+font-size: 16px !important;
+touch-action: manipulation;
 }
 
 input::placeholder, textarea::placeholder {
@@ -374,8 +383,86 @@ textarea { outline: none; }
 );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// §8  STATS VIEW
+// ─── §7.7  ClearableInput ─────────────────────────────────────────────────────
+/**
+
+- A text <input> with a × clear button that appears whenever the field has a value.
+- Accepts all standard input props plus the shared `c` theme object.
+- Pass `style` for the input’s own styles (the wrapper handles positioning).
+  */
+  function ClearableInput({ value, onChange, style, c, inputRef, …rest }) {
+  return (
+  
+   <div style={{ position: "relative", width: "100%" }}>
+     <input
+       ref={inputRef}
+       value={value}
+       onChange={onChange}
+       style={{
+         ...style,
+         paddingRight: value ? 36 : style?.paddingRight ?? 14,
+         width: "100%",
+       }}
+       {...rest}
+     />
+     {value ? (
+       <button
+         type="button"
+         onMouseDown={e => { e.preventDefault(); onChange({ target: { value: "" } }); }}
+         onTouchEnd={e => { e.preventDefault(); onChange({ target: { value: "" } }); }}
+         style={{
+           position:   "absolute", right: 10, top: "50%",
+           transform:  "translateY(-50%)",
+           background: "none", border: "none",
+           color:      c.sub, cursor: "pointer",
+           fontSize:   17, lineHeight: 1, padding: "0 2px",
+           touchAction: "manipulation",
+         }}
+       >
+         ×
+       </button>
+     ) : null}
+   </div>
+
+);
+}
+
+// ─── §7.8  ClearableTextarea ──────────────────────────────────────────────────
+/**
+
+- A <textarea> with a × clear button pinned to the top-right corner.
+  */
+  function ClearableTextarea({ value, onChange, style, c, …rest }) {
+  return (
+  
+   <div style={{ position: "relative", width: "100%" }}>
+     <textarea
+       value={value}
+       onChange={onChange}
+       style={{ ...style, paddingRight: value ? 32 : style?.paddingRight ?? 14, width: "100%" }}
+       {...rest}
+     />
+     {value ? (
+       <button
+         type="button"
+         onMouseDown={e => { e.preventDefault(); onChange({ target: { value: "" } }); }}
+         onTouchEnd={e => { e.preventDefault(); onChange({ target: { value: "" } }); }}
+         style={{
+           position:   "absolute", right: 8, top: 10,
+           background: "none", border: "none",
+           color:      c.sub, cursor: "pointer",
+           fontSize:   17, lineHeight: 1, padding: "0 2px",
+           touchAction: "manipulation",
+         }}
+       >
+         ×
+       </button>
+     ) : null}
+   </div>
+
+);
+}
+
 // Displays aggregated flight analytics: top crew, routes, aircraft, monthly
 // breakdown, and the crew status-light distribution.
 // ═════════════════════════════════════════════════════════════════════════════
@@ -686,12 +773,13 @@ return (
         </div>
         {nameEdit && (
           <div>
-            <input
+            <ClearableInput
               value={tempName}
               onChange={e => setTempName(e.target.value)}
               placeholder="新名字..."
               autoComplete="off"
               style={{ ...inp, marginBottom: nameErr ? 6 : 10, fontSize: 14 }}
+              c={c}
             />
             {nameErr && <div style={{ color: "#FF453A", fontSize: 11, marginBottom: 6 }}>{nameErr}</div>}
             <div style={{ fontSize: 10, color: "#FF453A", marginBottom: 8 }}>
@@ -797,13 +885,14 @@ return (
           ))}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <input
+          <ClearableInput
             value={newTag}
             onChange={e => setNewTag(e.target.value)}
             placeholder="#自訂標籤..."
             autoComplete="off"
             onKeyDown={e => e.key === "Enter" && addCustomTag()}
             style={{ ...inp, flex: 1, fontSize: 13, padding: "9px 12px" }}
+            c={c}
           />
           <button
             onClick={addCustomTag}
@@ -994,7 +1083,7 @@ c={c}
     {/* ── Crew Search ── */}
     <Sect label="組員 CREW MEMBER" c={c}>
       <div style={{ position: "relative" }}>
-        <input
+        <ClearableInput
           value={form.crewTxt}
           onChange={e => handleCrewInput(e.target.value)}
           placeholder="搜尋 ID / 姓名 / Nickname..."
@@ -1004,6 +1093,7 @@ c={c}
           autoCapitalize="none"
           spellCheck="false"
           style={{ ...inp, border: `1px solid ${form.crewId ? c.accent : c.border}`, opacity: editFlightId ? 0.7 : 1 }}
+          c={c}
         />
         {/* Suggestion dropdown */}
         {sugg.length > 0 && (
@@ -1085,8 +1175,8 @@ c={c}
       {addR && (
         <div style={{ background: c.cardAlt, border: `1px solid ${c.border}`, borderRadius: 12, padding: 12, marginBottom: 10 }}>
           <div style={{ fontSize: 9, letterSpacing: 3, color: c.accent, fontWeight: 700, marginBottom: 8 }}>ADD ROUTE</div>
-          <input value={rf.num}   onChange={e => setRf(r => ({ ...r, num:   e.target.value }))} placeholder="航班號 e.g. CI001"    autoComplete="off" style={{ ...inp, marginBottom: 6, borderRadius: 10, padding: "8px 12px", fontSize: 13 }} />
-          <input value={rf.route} onChange={e => setRf(r => ({ ...r, route: e.target.value }))} placeholder="航線 e.g. TPE→NRT" autoComplete="off" style={{ ...inp, marginBottom: 6, borderRadius: 10, padding: "8px 12px", fontSize: 13 }} />
+          <ClearableInput value={rf.num}   onChange={e => setRf(r => ({ ...r, num:   e.target.value }))} placeholder="航班號 e.g. CI001"    autoComplete="off" style={{ ...inp, marginBottom: 6, borderRadius: 10, padding: "8px 12px", fontSize: 13 }} c={c} />
+          <ClearableInput value={rf.route} onChange={e => setRf(r => ({ ...r, route: e.target.value }))} placeholder="航線 e.g. TPE→NRT" autoComplete="off" style={{ ...inp, marginBottom: 6, borderRadius: 10, padding: "8px 12px", fontSize: 13 }} c={c} />
           <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
             {AIRCRAFT.map(a => (
               <button
@@ -1107,8 +1197,8 @@ c={c}
 
       {/* Manual entry fields */}
       <div style={{ display: "flex", gap: 8 }}>
-        <input value={form.flightNum} onChange={e => setForm(f => ({ ...f, flightNum: e.target.value }))} placeholder="航班號 No."  autoComplete="off" style={{ ...inp, width: "auto", flex: 1 }} />
-        <input value={form.route}     onChange={e => setForm(f => ({ ...f, route:     e.target.value }))} placeholder="航線 Route" autoComplete="off" style={{ ...inp, width: "auto", flex: 1 }} />
+        <ClearableInput value={form.flightNum} onChange={e => setForm(f => ({ ...f, flightNum: e.target.value }))} placeholder="航班號 No."  autoComplete="off" style={{ ...inp, width: "auto", flex: 1 }} c={c} />
+        <ClearableInput value={form.route}     onChange={e => setForm(f => ({ ...f, route:     e.target.value }))} placeholder="航線 Route" autoComplete="off" style={{ ...inp, width: "auto", flex: 1 }} c={c} />
       </div>
     </Sect>
 
@@ -1151,12 +1241,13 @@ c={c}
           </button>
         ))}
       </div>
-      <input
+      <ClearableInput
         value={form.position}
         onChange={e => setForm(f => ({ ...f, position: e.target.value }))}
         placeholder="或自行輸入..."
         autoComplete="off"
         style={inp}
+        c={c}
       />
     </Sect>
 
@@ -1209,12 +1300,13 @@ c={c}
 
     {/* ── Memo ── */}
     <Sect label="備忘 MEMO" c={c}>
-      <textarea
+      <ClearableTextarea
         value={form.memo}
         onChange={e => setForm(f => ({ ...f, memo: e.target.value }))}
         rows={3}
         placeholder="這次飛行的備忘..."
         style={{ ...inp, resize: "vertical" }}
+        c={c}
       />
     </Sect>
 
@@ -1402,22 +1494,15 @@ right={
   {/* Search bar */}
   <div style={{ padding: "10px 16px", background: c.card, borderBottom: `1px solid ${c.border}`, flexShrink: 0 }}>
     <div style={{ position: "relative" }}>
-      <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: c.sub, fontSize: 14 }}>🔍</span>
-      <input
+      <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: c.sub, zIndex: 1, pointerEvents: "none", fontSize: 14 }}>🔍</span>
+      <ClearableInput
         value={search}
         onChange={e => setSearch(e.target.value)}
         placeholder="搜尋組員姓名或備忘..."
         autoComplete="off"
         style={inp}
+        c={c}
       />
-      {search && (
-        <button
-          onClick={() => setSearch("")}
-          style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: c.sub, cursor: "pointer", fontSize: 16, lineHeight: 1 }}
-        >
-          ×
-        </button>
-      )}
     </div>
   </div>
 
@@ -1944,7 +2029,7 @@ if (authStep === “passcode”) return (
 {/* Passcode card */}
 <div style={{ background: c.card, borderRadius: 20, padding: 24, border: `1px solid ${c.border}` }}>
 <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>通關密語 PASSCODE</div>
-<input
+<ClearableInput
 type=“password”
 value={passcodeInput}
 onChange={e => setPasscodeInput(e.target.value)}
@@ -1952,6 +2037,7 @@ onKeyDown={e => e.key === “Enter” && submitPasscode()}
 placeholder=”••••••••”
 autoFocus
 style={{ …inp, marginBottom: passcodeErr ? 8 : 16, fontSize: 20, letterSpacing: 6, textAlign: “center” }}
+c={c}
 />
 {passcodeErr && <div style={{ color: “#FF453A”, fontSize: 12, marginBottom: 12, textAlign: “center” }}>{passcodeErr}</div>}
 <button
@@ -1978,13 +2064,14 @@ Pick a name — your flight logs will be<br /><strong style={{ color: c.accent }
 </div>
 <div style={{ background: c.card, borderRadius: 20, padding: 24, border: `1px solid ${c.border}` }}>
 <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>你的名字 YOUR NAME</div>
-<input
+<ClearableInput
 value={usernameInput}
 onChange={e => setUsernameInput(e.target.value)}
 onKeyDown={e => e.key === “Enter” && submitUsername()}
 placeholder=“e.g. Erika, Hanae…”
 autoFocus
 style={{ …inp, marginBottom: usernameErr ? 8 : 16, fontSize: 18, textAlign: “center” }}
+c={c}
 />
 {usernameErr && <div style={{ color: “#FF453A”, fontSize: 12, marginBottom: 12, textAlign: “center” }}>{usernameErr}</div>}
 <button
@@ -2050,14 +2137,15 @@ const DashView = () => (
 
     {/* Search input */}
     <div style={{ position: "relative" }}>
-      <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: c.sub }}>🔍</span>
-      <input
+      <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: c.sub, zIndex: 1, pointerEvents: "none" }}>🔍</span>
+      <ClearableInput
         value={search}
         onChange={e => setSearch(e.target.value)}
         placeholder="ID / 姓名 / Nickname / 備忘..."
         autoComplete="off"
         autoCorrect="off"
         style={{ ...inp, paddingLeft: 36 }}
+        c={c}
       />
     </div>
   </div>
@@ -2170,10 +2258,10 @@ const DashView = () => (
       <div style={{ fontSize: 10, letterSpacing: 3, color: c.accent, fontWeight: 700, marginBottom: 4 }}>新增組員 ADD CREW</div>
       <div style={{ fontSize: 10, color: c.sub, marginBottom: 12 }}>⚠ Shared with all users</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-        <input value={newCrew.id}         onChange={e => setNewCrew(n => ({ ...n, id:         e.target.value }))} placeholder="員工 ID *"          autoComplete="off" style={{ ...inp, fontSize: 13, padding: "9px 12px" }} />
-        <input value={newCrew.nickname}   onChange={e => setNewCrew(n => ({ ...n, nickname:   e.target.value }))} placeholder="Nickname *"          autoComplete="off" style={{ ...inp, fontSize: 13, padding: "9px 12px" }} />
-        <input value={newCrew.name}       onChange={e => setNewCrew(n => ({ ...n, name:       e.target.value }))} placeholder="姓名 (中文/日文)"   autoComplete="off" style={{ ...inp, fontSize: 13, padding: "9px 12px" }} />
-        <input value={newCrew.seniority}  onChange={e => setNewCrew(n => ({ ...n, seniority:  e.target.value }))} placeholder="期別 e.g. 24G"       autoComplete="off" style={{ ...inp, fontSize: 13, padding: "9px 12px" }} />
+        <ClearableInput value={newCrew.id}        onChange={e => setNewCrew(n => ({ ...n, id:        e.target.value }))} placeholder="員工 ID *"        autoComplete="off" style={{ ...inp, fontSize: 13, padding: "9px 12px" }} c={c} />
+        <ClearableInput value={newCrew.nickname}  onChange={e => setNewCrew(n => ({ ...n, nickname:  e.target.value }))} placeholder="Nickname *"        autoComplete="off" style={{ ...inp, fontSize: 13, padding: "9px 12px" }} c={c} />
+        <ClearableInput value={newCrew.name}      onChange={e => setNewCrew(n => ({ ...n, name:      e.target.value }))} placeholder="姓名 (中文/日文)" autoComplete="off" style={{ ...inp, fontSize: 13, padding: "9px 12px" }} c={c} />
+        <ClearableInput value={newCrew.seniority} onChange={e => setNewCrew(n => ({ ...n, seniority: e.target.value }))} placeholder="期別 e.g. 24G"     autoComplete="off" style={{ ...inp, fontSize: 13, padding: "9px 12px" }} c={c} />
       </div>
       {addCrewErr && <div style={{ color: "#FF453A", fontSize: 12, marginBottom: 8 }}>{addCrewErr}</div>}
       <button
@@ -2315,9 +2403,9 @@ return (
         </div>
         {editCrewInfo ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <input value={tempCrewInfo.nickname}  onChange={e => setTempCrewInfo(t => ({ ...t, nickname:  e.target.value }))} placeholder="Nickname *" autoComplete="off" style={{ ...inp, borderRadius: 12, padding: "10px 14px" }} />
-            <input value={tempCrewInfo.name}      onChange={e => setTempCrewInfo(t => ({ ...t, name:      e.target.value }))} placeholder="姓名"        autoComplete="off" style={{ ...inp, borderRadius: 12, padding: "10px 14px" }} />
-            <input value={tempCrewInfo.seniority} onChange={e => setTempCrewInfo(t => ({ ...t, seniority: e.target.value }))} placeholder="期別 e.g. 24G" autoComplete="off" style={{ ...inp, borderRadius: 12, padding: "10px 14px" }} />
+            <ClearableInput value={tempCrewInfo.nickname}  onChange={e => setTempCrewInfo(t => ({ ...t, nickname:  e.target.value }))} placeholder="Nickname *"   autoComplete="off" style={{ ...inp, borderRadius: 12, padding: "10px 14px" }} c={c} />
+            <ClearableInput value={tempCrewInfo.name}      onChange={e => setTempCrewInfo(t => ({ ...t, name:      e.target.value }))} placeholder="姓名"          autoComplete="off" style={{ ...inp, borderRadius: 12, padding: "10px 14px" }} c={c} />
+            <ClearableInput value={tempCrewInfo.seniority} onChange={e => setTempCrewInfo(t => ({ ...t, seniority: e.target.value }))} placeholder="期別 e.g. 24G" autoComplete="off" style={{ ...inp, borderRadius: 12, padding: "10px 14px" }} c={c} />
           </div>
         ) : (
           <div style={{ background: c.cardAlt, border: `1px solid ${c.border}`, borderRadius: 12, padding: "10px 14px", fontSize: 13, color: c.sub, lineHeight: 1.8 }}>
@@ -2363,7 +2451,7 @@ return (
           </button>
         </div>
         {editNotes
-          ? <textarea value={tempNotes} onChange={e => setTempNotes(e.target.value)} rows={3} style={{ ...inp, resize: "vertical", border: `1px solid ${c.accent}`, borderRadius: 12 }} />
+          ? <ClearableTextarea value={tempNotes} onChange={e => setTempNotes(e.target.value)} rows={3} style={{ ...inp, resize: "vertical", border: `1px solid ${c.accent}`, borderRadius: 12 }} c={c} />
           : <div style={{ background: c.cardAlt, border: `1px solid ${c.border}`, borderRadius: 12, padding: "11px 14px", color: m.notes ? c.text : c.sub, fontSize: 14, minHeight: 48, lineHeight: 1.6 }}>
               {m.notes || "尚無備忘。No notes yet."}
             </div>
