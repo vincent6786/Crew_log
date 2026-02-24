@@ -16,19 +16,15 @@ import { INITIAL_CREW }                              from “./crewData”;
 // §1  CONFIGURATION
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Single passcode that gates access to the entire app. */
 const APP_PASSCODE = “crew2026”;
 
-/** Built-in tags (shown for all users, cannot be deleted). */
 const PRESET_TAGS = [
 “#好咖”, “#難搞”, “#細心”, “#新人”,
 “#好笑”, “#專業”, “#八卦”, “#準時”,
 ];
 
-/** Selectable aircraft types. */
 const AIRCRAFT = [“A321N”, “A330”, “A350”];
 
-/** Selectable cabin positions. */
 const POSITIONS = [
 “CIC”,
 “1L”,  “1R”,  “1LC”, “1LA”,
@@ -37,32 +33,23 @@ const POSITIONS = [
 “4L”,  “4R”,  “4LA”, “4RA”, “4RC”, “4C”,
 ];
 
-/**
-
-- Status light definitions.
-- Each key maps to display emoji, human-readable label, and CSS colour tokens.
-  */
-  const STATUS_MAP = {
-  red:    { emoji: “🔴”, label: “注意 / Warning”, color: “#FF453A”, bg: “rgba(255,69,58,0.13)”,  border: “rgba(255,69,58,0.45)”  },
-  yellow: { emoji: “🟡”, label: “普通 / Neutral”,  color: “#FFD60A”, bg: “rgba(255,214,10,0.13)”, border: “rgba(255,214,10,0.45)” },
-  green:  { emoji: “🟢”, label: “推薦 / Great!”,   color: “#30D158”, bg: “rgba(48,209,88,0.13)”,  border: “rgba(48,209,88,0.45)”  },
-  };
+const STATUS_MAP = {
+red:    { emoji: “🔴”, label: “注意 / Warning”, color: “#FF453A”, bg: “rgba(255,69,58,0.13)”,  border: “rgba(255,69,58,0.45)”  },
+yellow: { emoji: “🟡”, label: “普通 / Neutral”,  color: “#FFD60A”, bg: “rgba(255,214,10,0.13)”, border: “rgba(255,214,10,0.45)” },
+green:  { emoji: “🟢”, label: “推薦 / Great!”,   color: “#30D158”, bg: “rgba(48,209,88,0.13)”,  border: “rgba(48,209,88,0.45)”  },
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §2  UTILITIES
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Generates a short collision-resistant ID (timestamp base-36 + 4 random chars). */
 const mkId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-
-/** Returns today’s date as an ISO string (YYYY-MM-DD). */
 const today = () => new Date().toISOString().slice(0, 10);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §3  THEME PALETTES
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Dark theme colour tokens. */
 const DARK = {
 bg:      “#0B0C14”,
 card:    “#111320”,
@@ -76,7 +63,6 @@ pill:    “#1C1F32”,
 input:   “#181A28”,
 };
 
-/** Light theme colour tokens. */
 const LITE = {
 bg:      “#EEEEF7”,
 card:    “#FFFFFF”,
@@ -94,46 +80,13 @@ input:   “#F0F1FA”,
 // §4  FIRESTORE DOCUMENT REFERENCES
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Shared Firestore document — holds crew[] and routes[] for ALL users. */
 const SHARED_DOC = doc(db, “crewlog”, “shared”);
-
-/** Per-user private Firestore document — holds flights[] visible only to owner. */
 const flightDoc = (username) => doc(db, “crewlog”, `flights-${username}`);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §5  DATA MODEL SHAPES  (for reference — JS has no types)
+// §5  DEFAULT FORM STATE
 // ─────────────────────────────────────────────────────────────────────────────
 
-/*
-Crew member object:
-{
-id:         string   — employee ID (unique primary key)
-nickname:   string   — English callsign / display name
-name:       string   — Chinese/Japanese full name
-seniority:  string   — training batch e.g. “24G”
-status:     “red” | “yellow” | “green” | null
-tags:       string[] — subset of allTags
-notes:      string   — long-form shared notes
-}
-
-Flight log entry:
-{
-id:         string   — mkId()
-crewId:     string   — references crew.id
-date:       string   — “YYYY-MM-DD”
-flightNum:  string   — e.g. “CI001”
-route:      string   — e.g. “TPE→NRT”
-aircraft:   string   — one of AIRCRAFT
-position:   string   — one of POSITIONS or custom
-memo:       string   — private free-text note
-// NOTE: status & tags are NOT stored per-flight; they update the crew object
-}
-
-Saved route object:
-{ id, flightNum, route, aircraft }
-*/
-
-/** Default (empty) form state for QuickLogView. */
 const EMPTY_FORM = {
 crewId:    “”,
 crewTxt:   “”,
@@ -148,17 +101,11 @@ tags:      [],
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §6  GLOBAL STYLES  (injected via <style> tag in each screen)
+// §6  GLOBAL STYLES
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
-
-- Builds the global style string for the given theme.
-- Includes font imports, box-model reset, scrollbar styling,
-- and mobile UX tweaks (tap highlight, overscroll lock, button feedback).
-  */
-  const makeGlobalStyles = (c, dark) => `
-  @import url(‘https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Noto+Sans+JP:wght@300;400;500;700&display=swap’);
+const makeGlobalStyles = (c, dark) => `
+@import url(‘https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Noto+Sans+JP:wght@300;400;500;700&display=swap’);
 
 *, *::before, *::after {
 box-sizing: border-box;
@@ -180,10 +127,6 @@ input, textarea, button {
 font-family: ‘Syne’, ‘Noto Sans JP’, sans-serif;
 }
 
-/* Prevent iOS Safari from zooming in when an input is focused.
-Safari zooms whenever the focused element’s font-size < 16 px.
-Setting font-size:16px here and using transform to visually scale
-back down is the safest cross-browser fix.                        */
 input, textarea, select {
 font-size: 16px !important;
 touch-action: manipulation;
@@ -214,266 +157,216 @@ textarea { outline: none; }
 // ═════════════════════════════════════════════════════════════════════════════
 
 // ─── §7.1  Dot ───────────────────────────────────────────────────────────────
-/**
-
-- A small glowing circle used to represent a crew member’s status.
-- Falls back to the theme border colour when no status is set.
-  */
-  function Dot({ status, sz = 10, c }) {
-  const col = status ? STATUS_MAP[status].color : c.border;
-  return (
-  <span style={{
-  display:      “inline-block”,
-  width:        sz,
-  height:       sz,
-  borderRadius: “50%”,
-  background:   col,
-  flexShrink:   0,
-  boxShadow:    status ? `0 0 6px ${col}70` : 0,
-  }} />
-  );
-  }
+function Dot({ status, sz = 10, c }) {
+const col = status ? STATUS_MAP[status].color : c.border;
+return (
+<span style={{
+display:      “inline-block”,
+width:        sz,
+height:       sz,
+borderRadius: “50%”,
+background:   col,
+flexShrink:   0,
+boxShadow:    status ? `0 0 6px ${col}70` : 0,
+}} />
+);
+}
 
 // ─── §7.2  Tag ───────────────────────────────────────────────────────────────
-/**
-
-- Toggle pill button used for tag selection / filtering.
-- Highlighted (accent) when `on` is true.
-  */
-  function Tag({ on, onClick, children, c }) {
-  return (
-  <button
-  onClick={onClick}
-  style={{
-  background:   on ? c.accent : c.pill,
-  color:        on ? c.adk    : c.sub,
-  border:       “none”,
-  borderRadius: 20,
-  padding:      “5px 12px”,
-  fontSize:     12,
-  fontWeight:   700,
-  cursor:       “pointer”,
-  fontFamily:   “inherit”,
-  transition:   “all .15s”,
-  }}
-
-  {children}
-  </button>
-  );
-  }
+// FIX: Added missing `>` closing the <button> opening tag
+function Tag({ on, onClick, children, c }) {
+return (
+<button
+onClick={onClick}
+style={{
+background:   on ? c.accent : c.pill,
+color:        on ? c.adk    : c.sub,
+border:       “none”,
+borderRadius: 20,
+padding:      “5px 12px”,
+fontSize:     12,
+fontWeight:   700,
+cursor:       “pointer”,
+fontFamily:   “inherit”,
+transition:   “all .15s”,
+}}
+>
+{children}
+</button>
+);
+}
 
 // ─── §7.3  NavBar ─────────────────────────────────────────────────────────────
-/**
-
-- Top navigation bar shared by all full-page views.
-- Shows an optional back button, a two-line title block, and an optional right slot.
-  */
-  function NavBar({ title, sub, onBack, right, c }) {
-  return (
-  
-   <div style={{
-     padding:       "16px 16px 12px",
-     background:    c.card,
-     borderBottom:  `1px solid ${c.border}`,
-     flexShrink:    0,
-     display:       "flex",
-     alignItems:    "center",
-     gap:           10,
-   }}>
-     {onBack && (
-       <button
-         onClick={onBack}
-         style={{
-           background:   c.pill,
-           border:       "none",
-           color:        c.sub,
-           borderRadius: 10,
-           padding:      "8px 12px",
-           cursor:       "pointer",
-           fontSize:     18,
-           flexShrink:   0,
-         }}
-       >
-         ←
-       </button>
-     )}
-     <div style={{ flex: 1 }}>
-       <div style={{ fontSize: 9, letterSpacing: 4, color: c.accent, fontWeight: 700 }}>{sub}</div>
-       <div style={{ fontSize: 18, fontWeight: 800, color: c.text }}>{title}</div>
-     </div>
-     {right}
-   </div>
-
+function NavBar({ title, sub, onBack, right, c }) {
+return (
+<div style={{
+padding:       “16px 16px 12px”,
+background:    c.card,
+borderBottom:  `1px solid ${c.border}`,
+flexShrink:    0,
+display:       “flex”,
+alignItems:    “center”,
+gap:           10,
+}}>
+{onBack && (
+<button
+onClick={onBack}
+style={{
+background:   c.pill,
+border:       “none”,
+color:        c.sub,
+borderRadius: 10,
+padding:      “8px 12px”,
+cursor:       “pointer”,
+fontSize:     18,
+flexShrink:   0,
+}}
+>
+←
+</button>
+)}
+<div style={{ flex: 1 }}>
+<div style={{ fontSize: 9, letterSpacing: 4, color: c.accent, fontWeight: 700 }}>{sub}</div>
+<div style={{ fontSize: 18, fontWeight: 800, color: c.text }}>{title}</div>
+</div>
+{right}
+</div>
 );
 }
 
 // ─── §7.4  Sect ──────────────────────────────────────────────────────────────
-/**
-
-- Section container with a small uppercase label above its children.
-- Used to group related form fields or settings rows.
-  */
-  function Sect({ label, children, c }) {
-  return (
-  
-   <div style={{ marginBottom: 18 }}>
-     <div style={{
-       fontSize:      10,
-       letterSpacing: 3,
-       color:         c.sub,
-       fontWeight:    700,
-       marginBottom:  8,
-     }}>
-       {label}
-     </div>
-     {children}
-   </div>
-
+function Sect({ label, children, c }) {
+return (
+<div style={{ marginBottom: 18 }}>
+<div style={{
+fontSize:      10,
+letterSpacing: 3,
+color:         c.sub,
+fontWeight:    700,
+marginBottom:  8,
+}}>
+{label}
+</div>
+{children}
+</div>
 );
 }
 
 // ─── §7.5  SyncBadge ─────────────────────────────────────────────────────────
-/**
-
-- Small icon that reflects the current Firestore sync state:
-- ⏳ loading · ☁️ synced · ⚠️ error
-  */
-  function SyncBadge({ syncStatus, c }) {
-  const map = {
-  loading: { icon: “⏳”, color: c.sub        },
-  synced:  { icon: “☁️”, color: “#30D158”    },
-  error:   { icon: “⚠️”, color: “#FF453A”    },
-  };
-  const s = map[syncStatus];
-  return <span style={{ fontSize: 13, color: s.color }}>{s.icon}</span>;
-  }
+function SyncBadge({ syncStatus, c }) {
+const map = {
+loading: { icon: “⏳”, color: c.sub        },
+synced:  { icon: “☁️”, color: “#30D158”    },
+error:   { icon: “⚠️”, color: “#FF453A”    },
+};
+const s = map[syncStatus];
+return <span style={{ fontSize: 13, color: s.color }}>{s.icon}</span>;
+}
 
 // ─── §7.6  SettingsRow ───────────────────────────────────────────────────────
-/**
-
-- A single tappable row used inside the Settings screen.
-- Supports an icon, primary label, subtitle, a custom right element,
-- and an optional danger (red) variant.
-  */
-  function SettingsRow({ icon, label, sub, onClick, right, c, danger }) {
-  return (
-  
-   <div
-     onClick={onClick}
-     style={{
-       display:       "flex",
-       alignItems:    "center",
-       gap:           12,
-       padding:       "13px 14px",
-       background:    c.card,
-       border:        `1px solid ${danger ? "rgba(255,69,58,0.3)" : c.border}`,
-       borderRadius:  14,
-       cursor:        onClick ? "pointer" : "default",
-       marginBottom:  8,
-     }}
-   >
-     <span style={{ fontSize: 20, flexShrink: 0, width: 28, textAlign: "center" }}>{icon}</span>
-     <div style={{ flex: 1, minWidth: 0 }}>
-       <div style={{ fontSize: 14, fontWeight: 700, color: danger ? "#FF453A" : c.text }}>{label}</div>
-       {sub && <div style={{ fontSize: 11, color: c.sub, marginTop: 1 }}>{sub}</div>}
-     </div>
-     {right || (onClick && <span style={{ color: c.sub, fontSize: 16 }}>›</span>)}
-   </div>
-
+function SettingsRow({ icon, label, sub, onClick, right, c, danger }) {
+return (
+<div
+onClick={onClick}
+style={{
+display:       “flex”,
+alignItems:    “center”,
+gap:           12,
+padding:       “13px 14px”,
+background:    c.card,
+border:        `1px solid ${danger ? "rgba(255,69,58,0.3)" : c.border}`,
+borderRadius:  14,
+cursor:        onClick ? “pointer” : “default”,
+marginBottom:  8,
+}}
+>
+<span style={{ fontSize: 20, flexShrink: 0, width: 28, textAlign: “center” }}>{icon}</span>
+<div style={{ flex: 1, minWidth: 0 }}>
+<div style={{ fontSize: 14, fontWeight: 700, color: danger ? “#FF453A” : c.text }}>{label}</div>
+{sub && <div style={{ fontSize: 11, color: c.sub, marginTop: 1 }}>{sub}</div>}
+</div>
+{right || (onClick && <span style={{ color: c.sub, fontSize: 16 }}>›</span>)}
+</div>
 );
 }
 
 // ─── §7.7  ClearableInput ─────────────────────────────────────────────────────
-/**
-
-- A text <input> with a × clear button that appears whenever the field has a value.
-- Accepts all standard input props plus the shared `c` theme object.
-- Pass `style` for the input’s own styles (the wrapper handles positioning).
-  */
-  function ClearableInput({ value, onChange, style, c, inputRef, …rest }) {
-  return (
-  
-   <div style={{ position: "relative", width: "100%" }}>
-     <input
-       ref={inputRef}
-       value={value}
-       onChange={onChange}
-       style={{
-         ...style,
-         paddingRight: value ? 36 : style?.paddingRight ?? 14,
-         width: "100%",
-       }}
-       {...rest}
-     />
-     {value ? (
-       <button
-         type="button"
-         onMouseDown={e => { e.preventDefault(); onChange({ target: { value: "" } }); }}
-         onTouchEnd={e => { e.preventDefault(); onChange({ target: { value: "" } }); }}
-         style={{
-           position:   "absolute", right: 10, top: "50%",
-           transform:  "translateY(-50%)",
-           background: "none", border: "none",
-           color:      c.sub, cursor: "pointer",
-           fontSize:   17, lineHeight: 1, padding: "0 2px",
-           touchAction: "manipulation",
-         }}
-       >
-         ×
-       </button>
-     ) : null}
-   </div>
-
+// FIX: `…rest` → `...rest`
+function ClearableInput({ value, onChange, style, c, inputRef, …rest }) {
+return (
+<div style={{ position: “relative”, width: “100%” }}>
+<input
+ref={inputRef}
+value={value}
+onChange={onChange}
+style={{
+…style,
+paddingRight: value ? 36 : style?.paddingRight ?? 14,
+width: “100%”,
+}}
+{…rest}
+/>
+{value ? (
+<button
+type=“button”
+onMouseDown={e => { e.preventDefault(); onChange({ target: { value: “” } }); }}
+onTouchEnd={e => { e.preventDefault(); onChange({ target: { value: “” } }); }}
+style={{
+position:   “absolute”, right: 10, top: “50%”,
+transform:  “translateY(-50%)”,
+background: “none”, border: “none”,
+color:      c.sub, cursor: “pointer”,
+fontSize:   17, lineHeight: 1, padding: “0 2px”,
+touchAction: “manipulation”,
+}}
+>
+×
+</button>
+) : null}
+</div>
 );
 }
 
 // ─── §7.8  ClearableTextarea ──────────────────────────────────────────────────
-/**
-
-- A <textarea> with a × clear button pinned to the top-right corner.
-  */
-  function ClearableTextarea({ value, onChange, style, c, …rest }) {
-  return (
-  
-   <div style={{ position: "relative", width: "100%" }}>
-     <textarea
-       value={value}
-       onChange={onChange}
-       style={{ ...style, paddingRight: value ? 32 : style?.paddingRight ?? 14, width: "100%" }}
-       {...rest}
-     />
-     {value ? (
-       <button
-         type="button"
-         onMouseDown={e => { e.preventDefault(); onChange({ target: { value: "" } }); }}
-         onTouchEnd={e => { e.preventDefault(); onChange({ target: { value: "" } }); }}
-         style={{
-           position:   "absolute", right: 8, top: 10,
-           background: "none", border: "none",
-           color:      c.sub, cursor: "pointer",
-           fontSize:   17, lineHeight: 1, padding: "0 2px",
-           touchAction: "manipulation",
-         }}
-       >
-         ×
-       </button>
-     ) : null}
-   </div>
-
+// FIX: `…rest` → `...rest`
+function ClearableTextarea({ value, onChange, style, c, …rest }) {
+return (
+<div style={{ position: “relative”, width: “100%” }}>
+<textarea
+value={value}
+onChange={onChange}
+style={{ …style, paddingRight: value ? 32 : style?.paddingRight ?? 14, width: “100%” }}
+{…rest}
+/>
+{value ? (
+<button
+type=“button”
+onMouseDown={e => { e.preventDefault(); onChange({ target: { value: “” } }); }}
+onTouchEnd={e => { e.preventDefault(); onChange({ target: { value: “” } }); }}
+style={{
+position:   “absolute”, right: 8, top: 10,
+background: “none”, border: “none”,
+color:      c.sub, cursor: “pointer”,
+fontSize:   17, lineHeight: 1, padding: “0 2px”,
+touchAction: “manipulation”,
+}}
+>
+×
+</button>
+) : null}
+</div>
 );
 }
 
-// Displays aggregated flight analytics: top crew, routes, aircraft, monthly
-// breakdown, and the crew status-light distribution.
+// ═════════════════════════════════════════════════════════════════════════════
+// §8  STATS VIEW
 // ═════════════════════════════════════════════════════════════════════════════
 function StatsView({ crew, flights, onBack, c }) {
 
-// ── Derived statistics ──────────────────────────────────────────────────
 const totalFlights  = flights.length;
 const uniqueCrew    = […new Set(flights.map(f => f.crewId))].length;
 const uniqueRoutes  = […new Set(flights.filter(f => f.route).map(f => f.route))].length;
 
-// Most flown crew (top 5)
 const crewCount = {};
 flights.forEach(f => { crewCount[f.crewId] = (crewCount[f.crewId] || 0) + 1; });
 const topCrew = Object.entries(crewCount)
@@ -484,30 +377,23 @@ const m = crew.find(x => x.id === id);
 return { id, count, name: m ? m.nickname : id, fullName: m ? m.name : “” };
 });
 
-// Most flown routes (top 5)
 const routeCount = {};
 flights.forEach(f => { if (f.route) routeCount[f.route] = (routeCount[f.route] || 0) + 1; });
 const topRoutes = Object.entries(routeCount).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-// Aircraft usage
 const acCount = {};
 flights.forEach(f => { if (f.aircraft) acCount[f.aircraft] = (acCount[f.aircraft] || 0) + 1; });
 const topAc = Object.entries(acCount).sort((a, b) => b[1] - a[1]);
 
-// Flights by month (last 6)
 const monthCount = {};
 flights.forEach(f => {
 if (f.date) { const m = f.date.slice(0, 7); monthCount[m] = (monthCount[m] || 0) + 1; }
 });
 const months = Object.entries(monthCount).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 6);
 
-// Crew status breakdown (counts crew members, not flights)
 const statusCount = { green: 0, yellow: 0, red: 0, none: 0 };
 crew.forEach(m => { statusCount[m.status || “none”]++; });
 
-// ── Sub-components ───────────────────────────────────────────────────────
-
-/** Summary card with icon, large number, and label. */
 const StatCard = ({ icon, value, label }) => (
 <div style={{
 background:   c.cardAlt,
@@ -523,7 +409,6 @@ flex:         1,
 </div>
 );
 
-/** Horizontal bar showing a label and proportional count. */
 const Bar = ({ label, count, max }) => (
 <div style={{ display: “flex”, alignItems: “center”, gap: 10, marginBottom: 6 }}>
 <span style={{
@@ -551,7 +436,6 @@ paddingRight:    6,
 </div>
 );
 
-// ── Render ───────────────────────────────────────────────────────────────
 return (
 <div style={{ display: “flex”, flexDirection: “column”, height: “100vh”, overflow: “hidden” }}>
 <NavBar sub="STATISTICS" title="飛行統計 📊" onBack={onBack} c={c} />
@@ -559,7 +443,6 @@ return (
 ```
   <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 40px", WebkitOverflowScrolling: "touch" }}>
 
-    {/* Overview row */}
     <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
       <StatCard icon="✈" value={totalFlights} label="FLIGHTS" />
       <StatCard icon="👥" value={uniqueCrew}   label="CREW"    />
@@ -572,7 +455,6 @@ return (
       </div>
     ) : (
       <>
-        {/* Top Crew */}
         {topCrew.length > 0 && (
           <Sect label="最常合飛 TOP CREW" c={c}>
             <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
@@ -597,7 +479,6 @@ return (
           </Sect>
         )}
 
-        {/* Top Routes */}
         {topRoutes.length > 0 && (
           <Sect label="熱門航線 TOP ROUTES" c={c}>
             <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
@@ -608,7 +489,6 @@ return (
           </Sect>
         )}
 
-        {/* Aircraft */}
         {topAc.length > 0 && (
           <Sect label="機型統計 AIRCRAFT" c={c}>
             <div style={{ display: "flex", gap: 8 }}>
@@ -626,7 +506,6 @@ return (
           </Sect>
         )}
 
-        {/* Monthly */}
         {months.length > 0 && (
           <Sect label="月份紀錄 BY MONTH" c={c}>
             <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
@@ -637,7 +516,6 @@ return (
           </Sect>
         )}
 
-        {/* Status breakdown */}
         <Sect label="組員燈號分佈 STATUS" c={c}>
           <div style={{ display: "flex", gap: 8 }}>
             {Object.entries(STATUS_MAP).map(([k, v]) => (
@@ -649,7 +527,6 @@ return (
                 <div style={{ fontSize: 20, fontWeight: 800, color: v.color, marginTop: 4 }}>{statusCount[k]}</div>
               </div>
             ))}
-            {/* "No status" bucket */}
             <div style={{
               flex: 1, background: c.cardAlt, border: `1px solid ${c.border}`,
               borderRadius: 14, padding: "12px 8px", textAlign: "center",
@@ -670,8 +547,6 @@ return (
 
 // ═════════════════════════════════════════════════════════════════════════════
 // §9  SETTINGS VIEW
-// User preferences: account, dark mode, defaults, custom tags,
-// saved routes, data backup/import, and danger zone.
 // ═════════════════════════════════════════════════════════════════════════════
 function SettingsView({
 onBack, c, dark, setDark, username, onLogout, onExport, onGoGuide, onGoStats,
@@ -690,7 +565,6 @@ const fileRef = useRef(null);
 
 const allTags = […PRESET_TAGS, …customTags];
 
-/** Shared input style used throughout this view. */
 const inp = {
 background:   c.input,
 border:       `1px solid ${c.border}`,
@@ -703,9 +577,6 @@ outline:      “none”,
 width:        “100%”,
 };
 
-// ── Handlers ─────────────────────────────────────────────────────────────
-
-/** Reads an imported JSON backup and passes it to the parent handler. */
 const handleImportFile = (e) => {
 const file = e.target.files?.[0];
 if (!file) return;
@@ -724,20 +595,15 @@ reader.readAsText(file);
 e.target.value = “”;
 };
 
-/**
+const handleNameSave = () => {
+const name = tempName.trim();
+if (!name)          { setNameErr(“請輸入名字”); return; }
+if (name.length > 20) { setNameErr(“名字太長了”); return; }
+localStorage.setItem(“cl-username”, name);
+window.location.reload();
+};
 
-- Saves a new username to localStorage and reloads the page.
-- Reload is necessary to switch the Firestore flight document path.
-  */
-  const handleNameSave = () => {
-  const name = tempName.trim();
-  if (!name)          { setNameErr(“請輸入名字”); return; }
-  if (name.length > 20) { setNameErr(“名字太長了”); return; }
-  localStorage.setItem(“cl-username”, name);
-  window.location.reload();
-  };
-
-/** Adds a new custom tag (with # prefix normalisation and duplicate check). */
+// FIX: `…ct` → `...ct`
 const addCustomTag = () => {
 const tag = newTag.trim().startsWith(”#”) ? newTag.trim() : `#${newTag.trim()}`;
 if (!tag || tag === “#”) return;
@@ -747,7 +613,6 @@ setNewTag(””);
 setAddTagErr(””);
 };
 
-// ── Render ───────────────────────────────────────────────────────────────
 return (
 <div style={{ display: “flex”, flexDirection: “column”, height: “100vh”, overflow: “hidden” }}>
 <NavBar sub="SETTINGS" title="設定 ⚙" onBack={onBack} c={c} />
@@ -818,7 +683,6 @@ return (
 
     {/* ── Defaults ── */}
     <Sect label="預設值 DEFAULTS" c={c}>
-      {/* Default Aircraft */}
       <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14, marginBottom: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: c.text, marginBottom: 8 }}>✈ 預設機型 Default Aircraft</div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -839,7 +703,6 @@ return (
           ))}
         </div>
       </div>
-      {/* Default Position */}
       <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: c.text, marginBottom: 8 }}>💺 預設職位 Default Position</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
@@ -981,7 +844,6 @@ return (
       </div>
     </Sect>
 
-    {/* About */}
     <div style={{ textAlign: "center", padding: "16px 0 4px", color: c.sub, fontSize: 11, lineHeight: 1.8 }}>
       CrewLog v2.0 · Built with ✈ & ❤<br />
       <span style={{ color: c.accent, fontWeight: 700 }}>Your logs are safe & private.</span>
@@ -995,17 +857,13 @@ return (
 
 // ═════════════════════════════════════════════════════════════════════════════
 // §10  QUICK LOG VIEW
-// Form for creating a new flight log or editing an existing one.
-// When editing (editFlightId set): status & tags fields are hidden.
-// When creating: status & tags are applied to the crew member object on save.
 // ═════════════════════════════════════════════════════════════════════════════
 function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSave, onBack, c, allTags }) {
 const [form, setForm] = useState(initialForm);
-const [sugg, setSugg] = useState([]);   // crew search suggestions
-const [addR, setAddR] = useState(false); // show add-route panel
-const [rf,   setRf]   = useState({ num: “”, route: “”, ac: “” }); // new route fields
+const [sugg, setSugg] = useState([]);
+const [addR, setAddR] = useState(false);
+const [rf,   setRf]   = useState({ num: “”, route: “”, ac: “” });
 
-// Sync form when a different flight is loaded for editing
 const prevEdit = useRef(editFlightId);
 useEffect(() => {
 if (prevEdit.current !== editFlightId) {
@@ -1014,9 +872,7 @@ prevEdit.current = editFlightId;
 }
 }, [editFlightId, initialForm]);
 
-// ── Crew search ───────────────────────────────────────────────────────────
-
-/** Filters crew list as the user types; clears crewId until a match is picked. */
+// FIX: `…f` → `...f`
 const handleCrewInput = (val) => {
 setForm(f => ({ …f, crewTxt: val, crewId: “” }));
 if (!val.trim()) { setSugg([]); return; }
@@ -1030,7 +886,7 @@ m.nickname.toLowerCase().includes(q)
 );
 };
 
-/** Selects a crew member from the suggestion list. */
+// FIX: `…f`, `…m.tags` → `...f`, `...m.tags`
 const pickCrew = (m) => {
 setForm(f => ({
 …f,
@@ -1042,9 +898,7 @@ tags:    […m.tags],
 setSugg([]);
 };
 
-// ── Saved route management ────────────────────────────────────────────────
-
-/** Appends a new saved route and collapses the add-route panel. */
+// FIX: `…r` → `...r`
 const saveRoute = () => {
 if (!rf.num.trim()) return;
 setRoutes(r => […r, { id: mkId(), flightNum: rf.num.trim(), route: rf.route.trim(), aircraft: rf.ac }]);
@@ -1052,7 +906,6 @@ setRf({ num: “”, route: “”, ac: “” });
 setAddR(false);
 };
 
-/** Shared input style. */
 const inp = {
 background:   c.input,
 border:       `1px solid ${c.border}`,
@@ -1067,7 +920,6 @@ width:        “100%”,
 
 const tagsToShow = allTags || PRESET_TAGS;
 
-// ── Render ───────────────────────────────────────────────────────────────
 return (
 <div style={{ display: “flex”, flexDirection: “column”, height: “100vh”, overflow: “hidden” }}>
 <NavBar
@@ -1095,7 +947,6 @@ c={c}
           style={{ ...inp, border: `1px solid ${form.crewId ? c.accent : c.border}`, opacity: editFlightId ? 0.7 : 1 }}
           c={c}
         />
-        {/* Suggestion dropdown */}
         {sugg.length > 0 && (
           <div style={{
             position:     "absolute",
@@ -1147,7 +998,6 @@ c={c}
 
     {/* ── Flight Number & Route ── */}
     <Sect label="航班 FLIGHT" c={c}>
-      {/* Quick-pick saved routes */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
         {routes.map(r => (
           <button
@@ -1171,7 +1021,6 @@ c={c}
         </button>
       </div>
 
-      {/* Add-route panel */}
       {addR && (
         <div style={{ background: c.cardAlt, border: `1px solid ${c.border}`, borderRadius: 12, padding: 12, marginBottom: 10 }}>
           <div style={{ fontSize: 9, letterSpacing: 3, color: c.accent, fontWeight: 700, marginBottom: 8 }}>ADD ROUTE</div>
@@ -1195,7 +1044,6 @@ c={c}
         </div>
       )}
 
-      {/* Manual entry fields */}
       <div style={{ display: "flex", gap: 8 }}>
         <ClearableInput value={form.flightNum} onChange={e => setForm(f => ({ ...f, flightNum: e.target.value }))} placeholder="航班號 No."  autoComplete="off" style={{ ...inp, width: "auto", flex: 1 }} c={c} />
         <ClearableInput value={form.route}     onChange={e => setForm(f => ({ ...f, route:     e.target.value }))} placeholder="航線 Route" autoComplete="off" style={{ ...inp, width: "auto", flex: 1 }} c={c} />
@@ -1251,7 +1099,7 @@ c={c}
       />
     </Sect>
 
-    {/* ── Status & Tags  (new flights only) ── */}
+    {/* ── Status & Tags (new flights only) ── */}
     {!editFlightId && (
       <>
         <Sect label="紅黃綠燈 STATUS" c={c}>
@@ -1336,7 +1184,6 @@ c={c}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // §11  GUIDE VIEW
-// Static user guide rendered from a structured data array.
 // ═════════════════════════════════════════════════════════════════════════════
 function GuideView({ onBack, c }) {
 const sections = [
@@ -1393,7 +1240,6 @@ return (
 
 ```
   <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 40px", WebkitOverflowScrolling: "touch" }}>
-    {/* Hero banner */}
     <div style={{
       background:   `linear-gradient(135deg, ${c.accent}22, ${c.accent}08)`,
       border:       `1px solid ${c.accent}44`,
@@ -1406,7 +1252,6 @@ return (
       </div>
     </div>
 
-    {/* Guide sections */}
     {sections.map((s, i) => (
       <div key={i} style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 16, padding: "14px 16px", marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -1444,12 +1289,11 @@ return (
 
 // ═════════════════════════════════════════════════════════════════════════════
 // §12  MY LOG VIEW
-// Chronological personal logbook grouped by month, with crew search.
 // ═════════════════════════════════════════════════════════════════════════════
 function MyLogView({ flights, crew, username, onBack, onGoProfile, onEdit, c }) {
 const [search, setSearch] = useState(””);
 
-// Sort all flights newest-first, then optionally filter by crew name / memo
+// FIX: `…flights` → `...flights`
 const sorted = […flights].sort((a, b) => new Date(b.date) - new Date(a.date));
 const filtered = sorted.filter(f => {
 if (!search.trim()) return true;
@@ -1461,7 +1305,6 @@ return (
 );
 });
 
-// Group by YYYY-MM
 const grouped = {};
 filtered.forEach(f => {
 const month = f.date ? f.date.slice(0, 7) : “—”;
@@ -1491,7 +1334,6 @@ right={
 />
 
 ```
-  {/* Search bar */}
   <div style={{ padding: "10px 16px", background: c.card, borderBottom: `1px solid ${c.border}`, flexShrink: 0 }}>
     <div style={{ position: "relative" }}>
       <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: c.sub, zIndex: 1, pointerEvents: "none", fontSize: 14 }}>🔍</span>
@@ -1508,7 +1350,6 @@ right={
 
   <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 48px", WebkitOverflowScrolling: "touch" }}>
 
-    {/* Empty states */}
     {flights.length === 0 ? (
       <div style={{ textAlign: "center", padding: "64px 0", color: c.sub }}>
         <div style={{ fontSize: 36, marginBottom: 12 }}>✈</div>
@@ -1520,10 +1361,8 @@ right={
         找不到符合「{search}」的紀錄
       </div>
     ) : (
-      /* Monthly grouped list */
       months.map(month => (
         <div key={month} style={{ marginBottom: 28 }}>
-          {/* Month divider */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
             <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 3, color: c.accent, flexShrink: 0 }}>
               {month}
@@ -1552,7 +1391,6 @@ right={
                     alignItems:  "flex-start",
                   }}
                 >
-                  {/* Date column */}
                   <div style={{ flexShrink: 0, width: 36, paddingTop: 2, textAlign: "center" }}>
                     <div style={{ fontSize: 13, fontWeight: 800, color: c.text, lineHeight: 1 }}>
                       {f.date ? f.date.slice(8) : "—"}
@@ -1564,9 +1402,7 @@ right={
 
                   <div style={{ width: 1, alignSelf: "stretch", background: c.border, flexShrink: 0 }} />
 
-                  {/* Content */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Crew row — taps to profile */}
                     <div
                       onClick={() => m && onGoProfile(m.id)}
                       style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: hasMemo ? 7 : 0, cursor: m ? "pointer" : "default" }}
@@ -1590,7 +1426,6 @@ right={
                       )}
                     </div>
 
-                    {/* Memo preview (2-line clamp) */}
                     {hasMemo && (
                       <div style={{
                         fontSize: 12, color: c.sub, lineHeight: 1.55,
@@ -1603,7 +1438,6 @@ right={
                     )}
                   </div>
 
-                  {/* Edit button */}
                   <button
                     onClick={() => onEdit(f)}
                     style={{ background: "none", border: "none", color: c.sub, cursor: "pointer", fontSize: 13, padding: "2px 4px", flexShrink: 0, alignSelf: "flex-start" }}
@@ -1626,7 +1460,6 @@ right={
 
 // ═════════════════════════════════════════════════════════════════════════════
 // §13  ROOT APP COMPONENT
-// Owns all global state, Firestore sync, auth flow, and view routing.
 // ═════════════════════════════════════════════════════════════════════════════
 export default function App() {
 
@@ -1646,38 +1479,32 @@ const [passcodeErr,    setPasscodeErr]    = useState(””);
 const [usernameInput,  setUsernameInput]  = useState(””);
 const [usernameErr,    setUsernameErr]    = useState(””);
 
-// ── §13.3  Shared data (synced to Firestore for all users) ────────────────
+// ── §13.3  Shared data ────────────────────────────────────────────────────
 const [crew,   setCrew]   = useState([]);
 const [routes, setRoutes] = useState([]);
 
-// ── §13.4  Private data (synced per-user) ─────────────────────────────────
+// ── §13.4  Private data ───────────────────────────────────────────────────
 const [flights, setFlights] = useState([]);
 
 // ── §13.5  Sync state ─────────────────────────────────────────────────────
 const [ready,      setReady]      = useState(false);
 const [syncStatus, setSyncStatus] = useState(“loading”);
 
-/**
-
-- Guard refs prevent write-back loops:
-- When Firestore pushes a snapshot, we set the ref = true BEFORE updating state.
-- The write useEffect skips the setDoc call if the ref is true, then clears it.
-  */
-  const isRemoteShared  = useRef(false);
-  const isRemoteFlights = useRef(false);
+const isRemoteShared  = useRef(false);
+const isRemoteFlights = useRef(false);
 
 // ── §13.6  View routing ───────────────────────────────────────────────────
 const [view,      setView]      = useState(“dashboard”);
-const [profileId, setProfileId] = useState(null);  // active crew profile
+const [profileId, setProfileId] = useState(null);
 
 // ── §13.7  QuickLog form state ────────────────────────────────────────────
 const [qlInitialForm,  setQlInitialForm]  = useState({ …EMPTY_FORM, date: today() });
-const [qlEditFlightId, setQlEditFlightId] = useState(null); // null = new, string = editing
+const [qlEditFlightId, setQlEditFlightId] = useState(null);
 
 // ── §13.8  Dashboard UI state ─────────────────────────────────────────────
 const [search,    setSearch]    = useState(””);
 const [filterTag, setFilterTag] = useState(null);
-const [sortMode,  setSortMode]  = useState(“alpha”); // “alpha” | “recent”
+const [sortMode,  setSortMode]  = useState(“alpha”);
 
 // ── §13.9  Profile inline edit state ──────────────────────────────────────
 const [newCrew,        setNewCrew]        = useState({ id: “”, name: “”, nickname: “”, seniority: “” });
@@ -1686,31 +1513,30 @@ const [editCrewInfo,   setEditCrewInfo]   = useState(false);
 const [tempCrewInfo,   setTempCrewInfo]   = useState({ name: “”, nickname: “”, seniority: “” });
 const [editNotes,      setEditNotes]      = useState(false);
 const [tempNotes,      setTempNotes]      = useState(””);
-const [confirmDel,     setConfirmDel]     = useState(null);  // flight id pending delete
+const [confirmDel,     setConfirmDel]     = useState(null);
 const [confirmDelCrew, setConfirmDelCrew] = useState(false);
 
-// ── §13.10  User preferences (persisted to localStorage) ──────────────────
+// ── §13.10  User preferences ──────────────────────────────────────────────
 const [customTags, setCustomTags] = useState(() => {
 try { return JSON.parse(localStorage.getItem(“cl-customTags”) || “[]”); } catch { return []; }
 });
 const [defaultAircraft, setDefaultAircraft] = useState(() => localStorage.getItem(“cl-defaultAC”)  || “”);
 const [defaultPosition, setDefaultPosition] = useState(() => localStorage.getItem(“cl-defaultPos”) || “”);
 
-/** Combined tag list used everywhere tags are shown. */
+// FIX: `…PRESET_TAGS`, `…customTags` → `...PRESET_TAGS`, `...customTags`
 const allTags = […PRESET_TAGS, …customTags];
 
 // ─────────────────────────────────────────────────────────────────────────
 // §14  PERSISTENCE EFFECTS
 // ─────────────────────────────────────────────────────────────────────────
 
-useEffect(() => { localStorage.setItem(“cl-dark”,       String(dark));                    }, [dark]);
-useEffect(() => { localStorage.setItem(“cl-customTags”, JSON.stringify(customTags));      }, [customTags]);
-useEffect(() => { localStorage.setItem(“cl-defaultAC”,  defaultAircraft);                 }, [defaultAircraft]);
-useEffect(() => { localStorage.setItem(“cl-defaultPos”, defaultPosition);                 }, [defaultPosition]);
+useEffect(() => { localStorage.setItem(“cl-dark”,       String(dark));               }, [dark]);
+useEffect(() => { localStorage.setItem(“cl-customTags”, JSON.stringify(customTags)); }, [customTags]);
+useEffect(() => { localStorage.setItem(“cl-defaultAC”,  defaultAircraft);            }, [defaultAircraft]);
+useEffect(() => { localStorage.setItem(“cl-defaultPos”, defaultPosition);            }, [defaultPosition]);
 
 // ─────────────────────────────────────────────────────────────────────────
 // §15  AUTH BOOTSTRAP
-// Reads localStorage on mount to determine which auth screen to show.
 // ─────────────────────────────────────────────────────────────────────────
 
 useEffect(() => {
@@ -1723,11 +1549,8 @@ else                        { setAuthStep(“passcode”); }
 
 // ─────────────────────────────────────────────────────────────────────────
 // §16  FIRESTORE LISTENERS
-// Each listener sets its guard ref to true before updating state so the
-// corresponding write effect knows not to immediately write back.
 // ─────────────────────────────────────────────────────────────────────────
 
-// Shared doc — crew[] and routes[] (visible to all users)
 useEffect(() => {
 if (authStep !== “app”) return;
 const unsub = onSnapshot(
@@ -1744,7 +1567,6 @@ setReady(true);
 return () => unsub();
 }, [authStep]);
 
-// Private doc — flights[] (visible only to this user)
 useEffect(() => {
 if (authStep !== “app” || !username) return;
 const unsub = onSnapshot(
@@ -1760,17 +1582,14 @@ return () => unsub();
 
 // ─────────────────────────────────────────────────────────────────────────
 // §17  FIRESTORE WRITE EFFECTS
-// Only fire when state changes originate locally (guard refs are false).
 // ─────────────────────────────────────────────────────────────────────────
 
-// Write shared doc when crew or routes change locally
 useEffect(() => {
 if (!ready || authStep !== “app”) return;
 if (isRemoteShared.current) { isRemoteShared.current = false; return; }
 setDoc(SHARED_DOC, { crew, routes }).catch(() => setSyncStatus(“error”));
 }, [crew, routes, ready, authStep]);
 
-// Write private doc when flights change locally
 useEffect(() => {
 if (!ready || authStep !== “app” || !username) return;
 if (isRemoteFlights.current) { isRemoteFlights.current = false; return; }
@@ -1814,7 +1633,6 @@ setReady(false); setCrew([]); setFlights([]); setRoutes([]);
 // §19  DATA HANDLERS
 // ─────────────────────────────────────────────────────────────────────────
 
-/** Downloads all app data as a JSON backup file. */
 const exportJSON = () => {
 const data = { crew, flights, routes, customTags, exportedAt: new Date().toISOString() };
 const blob  = new Blob([JSON.stringify(data, null, 2)], { type: “application/json” });
@@ -1824,30 +1642,27 @@ a.href = url; a.download = `crewlog-backup-${today()}.json`; a.click();
 URL.revokeObjectURL(url);
 };
 
-/** Merges an imported JSON backup into local state. */
 const handleImport = useCallback((data) => {
-if (data.crew        && Array.isArray(data.crew))       setCrew(data.crew);
-if (data.routes      && Array.isArray(data.routes))     setRoutes(data.routes);
-if (Array.isArray(data.flights))                        setFlights(data.flights);
-if (Array.isArray(data.customTags))                     setCustomTags(data.customTags);
+if (data.crew        && Array.isArray(data.crew))   setCrew(data.crew);
+if (data.routes      && Array.isArray(data.routes)) setRoutes(data.routes);
+if (Array.isArray(data.flights))                    setFlights(data.flights);
+if (Array.isArray(data.customTags))                 setCustomTags(data.customTags);
 }, []);
 
 // ─────────────────────────────────────────────────────────────────────────
 // §20  CREW MUTATION HELPERS
 // ─────────────────────────────────────────────────────────────────────────
 
-/** Merges a partial patch object into a crew member. */
+// FIX: `…m`, `…patch` → `...m`, `...patch`
 const patchCrew = (id, patch) =>
 setCrew(cr => cr.map(m => m.id === id ? { …m, …patch } : m));
 
-/** Toggles a tag on a crew member (adds if absent, removes if present). */
 const flipTag = (id, tag) =>
 setCrew(cr => cr.map(m => {
 if (m.id !== id) return m;
 return { …m, tags: m.tags.includes(tag) ? m.tags.filter(t => t !== tag) : […m.tags, tag] };
 }));
 
-/** Removes a crew member from the shared list and deletes their flight entries. */
 const deleteCrew = (id) => {
 setCrew(cr => cr.filter(m => m.id !== id));
 setFlights(fl => fl.filter(f => f.crewId !== id));
@@ -1859,7 +1674,6 @@ setView(“dashboard”);
 // §21  NAVIGATION HELPERS
 // ─────────────────────────────────────────────────────────────────────────
 
-/** Navigate to a crew member’s profile, resetting all inline edit state. */
 const goProfile = (id) => {
 setProfileId(id);
 setEditNotes(false);
@@ -1868,50 +1682,37 @@ setConfirmDelCrew(false);
 setView(“profile”);
 };
 
-/**
+// FIX: `…EMPTY_FORM` → `...EMPTY_FORM`, `…m.tags` → `...m.tags`
+const openQL = (crewId = null, flightToEdit = null) => {
+if (flightToEdit) {
+const m = crew.find(x => x.id === flightToEdit.crewId);
+setQlInitialForm({
+crewId:    flightToEdit.crewId,
+crewTxt:   m ? `${m.nickname} — ${m.name}` : “”,
+date:      flightToEdit.date,
+flightNum: flightToEdit.flightNum  || “”,
+route:     flightToEdit.route      || “”,
+aircraft:  flightToEdit.aircraft   || “”,
+position:  flightToEdit.position   || “”,
+memo:      flightToEdit.memo       || “”,
+status:    null,
+tags:      [],
+});
+setQlEditFlightId(flightToEdit.id);
+} else {
+const f = { …EMPTY_FORM, date: today(), aircraft: defaultAircraft, position: defaultPosition };
+if (crewId) {
+const m = crew.find(x => x.id === crewId);
+if (m) { f.crewId = m.id; f.crewTxt = `${m.nickname} — ${m.name}`; f.status = m.status; f.tags = […m.tags]; }
+}
+setQlInitialForm(f);
+setQlEditFlightId(null);
+}
+setView(“quicklog”);
+};
 
-- Open the QuickLog form.
-- @param {string|null} crewId       — pre-select a crew member (new log)
-- @param {Object|null} flightToEdit — existing flight entry to edit
-  */
-  const openQL = (crewId = null, flightToEdit = null) => {
-  if (flightToEdit) {
-  // Editing an existing log — populate all fields, lock crew selector
-  const m = crew.find(x => x.id === flightToEdit.crewId);
-  setQlInitialForm({
-  crewId:    flightToEdit.crewId,
-  crewTxt:   m ? `${m.nickname} — ${m.name}` : “”,
-  date:      flightToEdit.date,
-  flightNum: flightToEdit.flightNum  || “”,
-  route:     flightToEdit.route      || “”,
-  aircraft:  flightToEdit.aircraft   || “”,
-  position:  flightToEdit.position   || “”,
-  memo:      flightToEdit.memo       || “”,
-  status:    null,
-  tags:      [],
-  });
-  setQlEditFlightId(flightToEdit.id);
-  } else {
-  // New log — pre-fill defaults and optionally pre-select a crew member
-  const f = { …EMPTY_FORM, date: today(), aircraft: defaultAircraft, position: defaultPosition };
-  if (crewId) {
-  const m = crew.find(x => x.id === crewId);
-  if (m) { f.crewId = m.id; f.crewTxt = `${m.nickname} — ${m.name}`; f.status = m.status; f.tags = […m.tags]; }
-  }
-  setQlInitialForm(f);
-  setQlEditFlightId(null);
-  }
-  setView(“quicklog”);
-  };
-
-/**
-
-- Called by QuickLogView on submit.
-- For new logs: also patches the crew member’s status and tags.
-- For edits: only updates flight metadata fields.
-  */
-  const handleSaveLog = (form) => {
-  if (!form.crewId || !form.date) return;
+const handleSaveLog = (form) => {
+if (!form.crewId || !form.date) return;
 
 ```
 const entry = {
@@ -1926,11 +1727,10 @@ const entry = {
 };
 
 if (qlEditFlightId) {
-  // Update existing flight
   setFlights(fl => fl.map(f => f.id === qlEditFlightId ? entry : f));
 } else {
-  // Add new flight and propagate status/tags to the crew member
   setFlights(fl => [...fl, entry]);
+  // FIX: `…m`, `…form.tags` → `...m`, `...form.tags`
   setCrew(cr => cr.map(m => {
     if (m.id !== form.crewId) return m;
     return {
@@ -1942,7 +1742,6 @@ if (qlEditFlightId) {
 }
 
 setQlEditFlightId(null);
-// Return to profile if we came from there, otherwise dashboard
 setView(profileId === form.crewId ? "profile" : "dashboard");
 ```
 
@@ -1952,43 +1751,35 @@ setView(profileId === form.crewId ? "profile" : "dashboard");
 // §22  DERIVED DATA
 // ─────────────────────────────────────────────────────────────────────────
 
-/** Map of crewId → most recent flight date string (used for “recent” sort). */
 const lastFlownMap = {};
 flights.forEach(f => {
 if (!lastFlownMap[f.crewId] || f.date > lastFlownMap[f.crewId]) lastFlownMap[f.crewId] = f.date;
 });
 
-/** Top 3 recently-flown crew IDs (unique), shown in the dashboard recent strip. */
+// FIX: `…new Set(...)` → `...new Set(...)`
 const recentIds = [
 …new Set([…flights].sort((a, b) => new Date(b.date) - new Date(a.date)).map(f => f.crewId))
 ].slice(0, 3);
 
-/**
+const filtered = crew
+.filter(m => {
+const q         = search.toLowerCase();
+const memoMatch = search.length > 1 && flights.filter(f => f.crewId === m.id).some(f => (f.memo || “”).toLowerCase().includes(q));
+const basic     = !q || m.id.includes(q) || m.name.toLowerCase().includes(q) || m.nickname.toLowerCase().includes(q) || memoMatch;
+return basic && (!filterTag || m.tags.includes(filterTag));
+})
+.sort((a, b) => {
+if (sortMode === “recent”) {
+const la = lastFlownMap[a.id] || “0000”;
+const lb = lastFlownMap[b.id] || “0000”;
+return lb.localeCompare(la);
+}
+return a.nickname.localeCompare(b.nickname, “ja”);
+});
 
-- Filtered & sorted crew list for the dashboard.
-- Search matches: id, name, nickname, or memo text (if query length > 1).
-  */
-  const filtered = crew
-  .filter(m => {
-  const q         = search.toLowerCase();
-  const memoMatch = search.length > 1 && flights.filter(f => f.crewId === m.id).some(f => (f.memo || “”).toLowerCase().includes(q));
-  const basic     = !q || m.id.includes(q) || m.name.toLowerCase().includes(q) || m.nickname.toLowerCase().includes(q) || memoMatch;
-  return basic && (!filterTag || m.tags.includes(filterTag));
-  })
-  .sort((a, b) => {
-  if (sortMode === “recent”) {
-  const la = lastFlownMap[a.id] || “0000”;
-  const lb = lastFlownMap[b.id] || “0000”;
-  return lb.localeCompare(la);
-  }
-  return a.nickname.localeCompare(b.nickname, “ja”);
-  });
-
-/** Active profile crew member and their flight history. */
 const pMember  = crew.find(m => m.id === profileId);
 const pFlights = flights.filter(f => f.crewId === profileId).sort((a, b) => new Date(b.date) - new Date(a.date));
 
-/** Shared input style used in inline form fields throughout the app. */
 const inp = {
 background:   c.input,
 border:       `1px solid ${c.border}`,
@@ -2003,7 +1794,6 @@ width:        “100%”,
 
 // ─────────────────────────────────────────────────────────────────────────
 // §23  AUTH SCREENS
-// These render before the main app shell is mounted.
 // ─────────────────────────────────────────────────────────────────────────
 
 if (authStep === “loading”) return (
@@ -2019,14 +1809,12 @@ if (authStep === “passcode”) return (
 <div style={{ background: c.bg, minHeight: “100vh”, display: “flex”, flexDirection: “column”, alignItems: “center”, justifyContent: “center”, padding: 32, overflowX: “hidden” }}>
 <style>{gs}</style>
 <div style={{ width: “100%”, maxWidth: 360 }}>
-{/* Logo + branding */}
 <div style={{ textAlign: “center”, marginBottom: 40 }}>
 <img src=”/logo.png” alt=“CrewLog” style={{ width: 80, height: 80, objectFit: “contain”, marginBottom: 12, borderRadius: 18 }} />
 <div style={{ fontSize: 9, letterSpacing: 5, color: c.accent, fontWeight: 700, marginBottom: 6 }}>CREW LOG</div>
 <div style={{ fontSize: 26, fontWeight: 800, color: c.text, lineHeight: 1.2 }}>空中生存指南</div>
 <div style={{ fontSize: 13, color: c.sub, marginTop: 8 }}>Enter passcode to continue</div>
 </div>
-{/* Passcode card */}
 <div style={{ background: c.card, borderRadius: 20, padding: 24, border: `1px solid ${c.border}` }}>
 <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>通關密語 PASSCODE</div>
 <ClearableInput
@@ -2096,18 +1884,13 @@ if (!ready) return (
 );
 
 // ─────────────────────────────────────────────────────────────────────────
-// §24  DASHBOARD VIEW  (inline function — closure over App state)
-// Main crew list: search bar, tag filters, sort toggle, recent strip,
-// scrollable crew cards, add-crew form, and floating + button.
-// NOTE: Declared as a function (not a component) so it shares App’s state.
+// §24  DASHBOARD VIEW
 // ─────────────────────────────────────────────────────────────────────────
 const DashView = () => (
 <div style={{ display: “flex”, flexDirection: “column”, height: “100vh”, overflow: “hidden” }}>
 
 ```
-  {/* ── Header ── */}
   <div style={{ padding: "18px 16px 12px", background: c.card, borderBottom: `1px solid ${c.border}`, flexShrink: 0 }}>
-    {/* Top row: title + icon buttons */}
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
       <div>
         <div style={{ fontSize: 9, letterSpacing: 4, color: c.accent, fontWeight: 700, marginBottom: 2 }}>CREW LOG ✈ 空中生存指南</div>
@@ -2122,7 +1905,6 @@ const DashView = () => (
       </div>
     </div>
 
-    {/* User / logbook shortcut */}
     <div
       onClick={() => setView("mylog")}
       style={{ background: c.pill, borderRadius: 12, padding: "8px 12px", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
@@ -2135,7 +1917,6 @@ const DashView = () => (
       <span style={{ fontSize: 11, color: c.accent, fontWeight: 700 }}>日誌 ›</span>
     </div>
 
-    {/* Search input */}
     <div style={{ position: "relative" }}>
       <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: c.sub, zIndex: 1, pointerEvents: "none" }}>🔍</span>
       <ClearableInput
@@ -2150,10 +1931,8 @@ const DashView = () => (
     </div>
   </div>
 
-  {/* ── Scrollable body ── */}
   <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "14px 16px 80px", WebkitOverflowScrolling: "touch" }}>
 
-    {/* Tag filter strip + sort toggle */}
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16, alignItems: "center" }}>
       <Tag on={!filterTag} onClick={() => setFilterTag(null)} c={c}>ALL</Tag>
       {allTags.map(t => (
@@ -2165,7 +1944,6 @@ const DashView = () => (
       </div>
     </div>
 
-    {/* Recent strip — hidden when searching or filtering */}
     {recentIds.length > 0 && !search && !filterTag && (
       <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 9, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>我的最近合飛 MY RECENT</div>
@@ -2199,7 +1977,6 @@ const DashView = () => (
       </div>
     )}
 
-    {/* All Crew list */}
     <div style={{ fontSize: 9, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 10 }}>
       全部組員 ALL CREW ({filtered.length})
     </div>
@@ -2253,7 +2030,6 @@ const DashView = () => (
       })}
     </div>
 
-    {/* Add new crew form */}
     <div style={{ marginTop: 24, background: c.card, border: `1px dashed ${c.border}`, borderRadius: 16, padding: 16 }}>
       <div style={{ fontSize: 10, letterSpacing: 3, color: c.accent, fontWeight: 700, marginBottom: 4 }}>新增組員 ADD CREW</div>
       <div style={{ fontSize: 10, color: c.sub, marginBottom: 12 }}>⚠ Shared with all users</div>
@@ -2289,7 +2065,6 @@ const DashView = () => (
     </div>
   </div>
 
-  {/* Floating action button */}
   <button
     onClick={() => openQL()}
     style={{
@@ -2311,9 +2086,7 @@ const DashView = () => (
 );
 
 // ─────────────────────────────────────────────────────────────────────────
-// §25  PROFILE VIEW  (inline function — closure over App state)
-// Shows a single crew member’s status, tags, shared notes, and private
-// flight timeline. Supports inline editing of crew info and notes.
+// §25  PROFILE VIEW
 // ─────────────────────────────────────────────────────────────────────────
 const ProfView = () => {
 if (!pMember) return null;
@@ -2324,16 +2097,13 @@ const si = m.status ? STATUS_MAP[m.status] : null;
 return (
   <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
 
-    {/* ── Profile header ── */}
     <div style={{ padding: "16px 16px 14px", background: si ? si.bg : c.card, borderBottom: `2px solid ${si ? si.border : c.border}`, flexShrink: 0 }}>
-      {/* Nav row */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         <button onClick={() => setView("dashboard")} style={{ background: "rgba(128,128,128,0.15)", border: "none", color: c.text, borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontSize: 18 }}>←</button>
         <div style={{ flex: 1 }} />
         <button onClick={() => openQL(m.id)} style={{ background: c.accent, color: c.adk, border: "none", borderRadius: 10, padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ 新增飛行</button>
       </div>
 
-      {/* Status banner */}
       {si && (
         <div style={{ background: si.bg, border: `1px solid ${si.border}`, borderRadius: 10, padding: "7px 12px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 16 }}>{si.emoji}</span>
@@ -2341,7 +2111,6 @@ return (
         </div>
       )}
 
-      {/* Avatar + name block */}
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12 }}>
         <div style={{
           width: 54, height: 54, borderRadius: 16, flexShrink: 0,
@@ -2360,7 +2129,6 @@ return (
         </div>
       </div>
 
-      {/* Status light toggles */}
       <div style={{ display: "flex", gap: 6 }}>
         {Object.entries(STATUS_MAP).map(([k, v]) => (
           <button
@@ -2379,10 +2147,9 @@ return (
       </div>
     </div>
 
-    {/* ── Profile body ── */}
     <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "14px 16px 32px", WebkitOverflowScrolling: "touch" }}>
 
-      {/* Crew Info (shared — editable by anyone) */}
+      {/* Crew Info */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 9, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>組員資料 CREW INFO</span>
@@ -2415,7 +2182,7 @@ return (
         )}
       </div>
 
-      {/* Tags (shared) */}
+      {/* Tags */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 9, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>標籤 TAGS</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -2436,7 +2203,7 @@ return (
         </div>
       </div>
 
-      {/* Long-term notes (shared) */}
+      {/* Notes */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 9, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>長期筆記 NOTES</span>
@@ -2458,7 +2225,7 @@ return (
         }
       </div>
 
-      {/* Private flight history timeline */}
+      {/* Flight history */}
       <div>
         <div style={{ fontSize: 9, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 14 }}>
           我的合飛紀錄 MY HISTORY ({pFlights.length}) <span style={{ fontWeight: 400, fontSize: 8 }}>🔒 only you</span>
@@ -2469,16 +2236,13 @@ return (
             尚無紀錄<br />No flights logged yet
           </div>
         ) : (
-          /* Vertical timeline */
           <div style={{ position: "relative" }}>
             <div style={{ position: "absolute", left: 15, top: 6, bottom: 6, width: 1, background: c.border }} />
             {pFlights.map(f => (
               <div key={f.id} style={{ position: "relative", paddingLeft: 38, marginBottom: 14 }}>
-                {/* Timeline dot */}
                 <div style={{ position: "absolute", left: 9, top: 14, width: 13, height: 13, borderRadius: "50%", background: c.accent, border: `2px solid ${c.bg}` }} />
 
                 <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, padding: "10px 12px" }}>
-                  {/* Flight header */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 5 }}>
                     <span style={{ fontWeight: 700, color: c.text, fontSize: 14 }}>
                       {f.flightNum || "—"}
@@ -2487,7 +2251,6 @@ return (
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0, marginLeft: 8 }}>
                       <span style={{ fontSize: 11, color: c.sub }}>{f.date}</span>
                       <button onClick={() => openQL(null, f)} style={{ background: "none", border: "none", color: c.sub, cursor: "pointer", fontSize: 13, padding: "0 2px" }}>✏</button>
-                      {/* Delete with confirmation */}
                       {confirmDel === f.id ? (
                         <div style={{ display: "flex", gap: 4 }}>
                           <button
@@ -2509,13 +2272,11 @@ return (
                     </div>
                   </div>
 
-                  {/* Aircraft & position badges */}
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: f.memo ? 5 : 0 }}>
                     {f.aircraft && <span style={{ background: c.pill, color: c.accent, borderRadius: 8, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>{f.aircraft}</span>}
                     {f.position && <span style={{ background: c.pill, color: c.sub,    borderRadius: 8, padding: "2px 8px", fontSize: 11 }}>{f.position}</span>}
                   </div>
 
-                  {/* Memo */}
                   {f.memo && <div style={{ fontSize: 13, color: c.sub, borderTop: `1px solid ${c.border}`, paddingTop: 5, marginTop: 2 }}>📝 {f.memo}</div>}
                 </div>
               </div>
@@ -2524,7 +2285,7 @@ return (
         )}
       </div>
 
-      {/* Danger zone — delete crew member */}
+      {/* Danger zone */}
       <div style={{ marginTop: 32, borderTop: `1px solid ${c.border}`, paddingTop: 20 }}>
         <div style={{ fontSize: 9, letterSpacing: 3, color: "#FF453A", fontWeight: 700, marginBottom: 10 }}>危險區域 DANGER ZONE</div>
         {confirmDelCrew ? (
@@ -2556,8 +2317,6 @@ return (
 
 // ─────────────────────────────────────────────────────────────────────────
 // §26  MAIN RENDER
-// Injects global styles, applies the 440 px max-width shell,
-// and routes to the correct view based on the `view` state string.
 // ─────────────────────────────────────────────────────────────────────────
 return (
 <>
@@ -2575,7 +2334,6 @@ touchAction: “pan-y”,
 }}>
 
 ```
-    {/* ── View router ── */}
     {view === "dashboard" && DashView()}
 
     {view === "quicklog" && (
