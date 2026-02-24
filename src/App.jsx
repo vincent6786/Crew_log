@@ -7,6 +7,7 @@ const APP_PASSCODE = "crew2026";
 
 const PRESET_TAGS = ["#好咖","#難搞","#細心","#新人","#好笑","#專業","#八卦","#準時"];
 const AIRCRAFT    = ["A321N","A330","A350"];
+//const POSITIONS   = ["G1","G2","G3","G4","G5","L1","L2","L3","SA","PA"];
 const POSITIONS   = ["G1","G2","G3","G4","G5","L1","L2","L3","SA","PA"];
 const STATUS_MAP  = {
   red:    { emoji:"🔴", label:"注意 / Warning", color:"#FF453A", bg:"rgba(255,69,58,0.13)",  border:"rgba(255,69,58,0.45)"  },
