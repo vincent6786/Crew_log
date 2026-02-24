@@ -2402,6 +2402,5 @@ touchAction: “pan-y”,
 </>
 ```
 
-
 );
 }
