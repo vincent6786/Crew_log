@@ -710,6 +710,189 @@ function GuideView({ onBack, c }) {
   );
 }
 
+// ─── MyLogView ────────────────────────────────────────────────────────────────
+function MyLogView({ flights, crew, username, onBack, onGoProfile, onEdit, c }) {
+  const [search, setSearch] = useState("");
+
+  const sorted = [...flights].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const filtered = sorted.filter(f => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    const m = crew.find(x => x.id === f.crewId);
+    return (
+      (m && (m.nickname.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))) ||
+      (f.memo || "").toLowerCase().includes(q)
+    );
+  });
+
+  // Group by month, newest first
+  const grouped = {};
+  filtered.forEach(f => {
+    const month = f.date ? f.date.slice(0, 7) : "—";
+    if (!grouped[month]) grouped[month] = [];
+    grouped[month].push(f);
+  });
+  const months = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
+
+  const inp = {
+    background: c.input, border: `1px solid ${c.border}`, borderRadius: 12,
+    padding: "9px 14px 9px 36px", color: c.text, fontSize: 14,
+    fontFamily: "inherit", outline: "none", width: "100%",
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+      <NavBar
+        sub="MY LOGBOOK"
+        title={`${username} 的飛行日誌`}
+        onBack={onBack}
+        c={c}
+        right={
+          <span style={{ fontSize: 12, color: c.sub, fontWeight: 700, background: c.pill, borderRadius: 8, padding: "4px 10px" }}>
+            {flights.length} 筆
+          </span>
+        }
+      />
+
+      {/* Search */}
+      <div style={{ padding: "10px 16px", background: c.card, borderBottom: `1px solid ${c.border}`, flexShrink: 0 }}>
+        <div style={{ position: "relative" }}>
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: c.sub, fontSize: 14 }}>🔍</span>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="搜尋組員姓名或備忘..."
+            autoComplete="off"
+            style={inp}
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: c.sub, cursor: "pointer", fontSize: 16, lineHeight: 1 }}>
+              ×
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 48px", WebkitOverflowScrolling: "touch" }}>
+
+        {flights.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "64px 0", color: c.sub }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>✈</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: c.text, marginBottom: 6 }}>尚無飛行紀錄</div>
+            <div style={{ fontSize: 13 }}>點右下角 + 開始記錄你的第一次飛行</div>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "64px 0", color: c.sub, fontSize: 14 }}>
+            找不到符合「{search}」的紀錄
+          </div>
+        ) : (
+          months.map(month => (
+            <div key={month} style={{ marginBottom: 28 }}>
+
+              {/* Month divider */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 3, color: c.accent, flexShrink: 0 }}>
+                  {month}
+                </span>
+                <div style={{ flex: 1, height: 1, background: c.border }} />
+                <span style={{ fontSize: 10, color: c.sub, flexShrink: 0 }}>{grouped[month].length} 筆</span>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {grouped[month].map(f => {
+                  const m = crew.find(x => x.id === f.crewId);
+                  const si = m?.status ? STATUS_MAP[m.status] : null;
+                  const hasMemo = !!f.memo?.trim();
+
+                  return (
+                    <div key={f.id} style={{
+                      background: c.card,
+                      border: `1px solid ${c.border}`,
+                      borderLeft: `3px solid ${si ? si.color : c.border}`,
+                      borderRadius: 14,
+                      padding: "12px 14px",
+                      display: "flex",
+                      gap: 12,
+                      alignItems: "flex-start",
+                    }}>
+
+                      {/* Left: date column */}
+                      <div style={{ flexShrink: 0, width: 36, paddingTop: 2, textAlign: "center" }}>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: c.text, lineHeight: 1 }}>
+                          {f.date ? f.date.slice(8) : "—"}
+                        </div>
+                        <div style={{ fontSize: 9, color: c.sub, fontWeight: 600, marginTop: 2 }}>
+                          {f.date ? ["SUN","MON","TUE","WED","THU","FRI","SAT"][new Date(f.date).getDay()] : ""}
+                        </div>
+                      </div>
+
+                      {/* Divider */}
+                      <div style={{ width: 1, alignSelf: "stretch", background: c.border, flexShrink: 0 }} />
+
+                      {/* Right: content */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+
+                        {/* Crew row — tappable */}
+                        <div
+                          onClick={() => m && onGoProfile(m.id)}
+                          style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: hasMemo ? 7 : 0, cursor: m ? "pointer" : "default" }}>
+                          {si
+                            ? <span style={{ fontSize: 13, lineHeight: 1, flexShrink: 0 }}>{si.emoji}</span>
+                            : <Dot status={null} sz={8} c={c} />
+                          }
+                          <span style={{ fontWeight: 800, fontSize: 15, color: c.text }}>
+                            {m ? m.nickname : `#${f.crewId}`}
+                          </span>
+                          {m?.name && (
+                            <span style={{ fontSize: 12, color: c.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {m.name}
+                            </span>
+                          )}
+                          {/* subtle flight badge if exists */}
+                          {f.flightNum && (
+                            <span style={{ marginLeft: "auto", fontSize: 10, color: c.accent, fontWeight: 700, background: c.pill, borderRadius: 6, padding: "1px 6px", flexShrink: 0 }}>
+                              {f.flightNum}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Memo preview */}
+                        {hasMemo && (
+                          <div style={{
+                            fontSize: 12, color: c.sub, lineHeight: 1.55,
+                            background: c.cardAlt, borderRadius: 8,
+                            padding: "6px 10px",
+                            display: "-webkit-box", WebkitLineClamp: 2,
+                            WebkitBoxOrient: "vertical", overflow: "hidden",
+                          }}>
+                            📝 {f.memo}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Edit button */}
+                      <button
+                        onClick={() => onEdit(f)}
+                        style={{ background: "none", border: "none", color: c.sub, cursor: "pointer", fontSize: 13, padding: "2px 4px", flexShrink: 0, alignSelf: "flex-start" }}>
+                        ✏
+                      </button>
+
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [dark, setDark] = useState(() => {
@@ -1013,12 +1196,15 @@ export default function App() {
             <button onClick={()=>setView("settings")} style={{background:c.pill,border:"none",color:c.sub,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:16}}>⚙</button>
           </div>
         </div>
-        <div style={{background:c.pill,borderRadius:12,padding:"8px 12px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div
+          onClick={() => setView("mylog")}
+          style={{background:c.pill,borderRadius:12,padding:"8px 12px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer"}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:14}}>👤</span>
             <span style={{fontSize:13,fontWeight:700,color:c.text}}>{username}</span>
             <span style={{fontSize:11,color:c.sub}}>· {flights.length} 筆</span>
           </div>
+          <span style={{fontSize:11,color:c.accent,fontWeight:700}}>日誌 ›</span>
         </div>
         <div style={{position:"relative"}}>
           <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:c.sub}}>🔍</span>
@@ -1299,6 +1485,17 @@ export default function App() {
           />
         )}
         {view === "profile"   && ProfView()}
+        {view === "mylog" && (
+          <MyLogView
+            flights={flights}
+            crew={crew}
+            username={username}
+            onBack={() => setView("dashboard")}
+            onGoProfile={(id) => { setProfileId(id); setView("profile"); }}
+            onEdit={(f) => { openQL(null, f); }}
+            c={c}
+          />
+        )}
         {view === "guide"     && <GuideView onBack={() => setView("settings")} c={c}/>}
         {view === "stats"     && <StatsView crew={crew} flights={flights} onBack={() => setView("settings")} c={c}/>}
         {view === "settings"  && (
