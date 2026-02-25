@@ -488,14 +488,31 @@ function ClearableTextarea({ value, onChange, style, c, ...rest }) {
 // Displays aggregated flight analytics: top crew, routes, aircraft, monthly
 // breakdown, and the crew status-light distribution.
 // ═════════════════════════════════════════════════════════════════════════════
-function StatsView({ crew, flights, onBack, c }) {
+function StatsView({ crew, flights, onBack, showAcStats, showRouteStats, c }) {
 
   // ── Derived statistics ──────────────────────────────────────────────────
   const totalFlights  = flights.length;
   const uniqueCrew    = [...new Set(flights.map(f => f.crewId))].length;
-  const uniqueRoutes  = [...new Set(flights.filter(f => f.route).map(f => f.route))].length;
 
-  // Most flown crew (top 5)
+  /**
+   * Deduplicated flights for route/aircraft stats.
+   * If multiple crew members log the same flightNum on the same date,
+   * that is ONE physical flight — count it once.
+   * Key: flightNum+date when flightNum exists; date+route+aircraft otherwise.
+   */
+  const seenKeys = new Set();
+  const uniqueFlights = flights.filter(f => {
+    const key = f.flightNum
+      ? `${f.flightNum}_${f.date}`
+      : `${f.date}_${f.route || ""}_${f.aircraft || ""}`;
+    if (seenKeys.has(key)) return false;
+    seenKeys.add(key);
+    return true;
+  });
+
+  const uniqueRoutes  = [...new Set(uniqueFlights.filter(f => f.route).map(f => f.route))].length;
+
+  // Most flown crew (top 5) — still counts per-person entries (intentional)
   const crewCount = {};
   flights.forEach(f => { crewCount[f.crewId] = (crewCount[f.crewId] || 0) + 1; });
   const topCrew = Object.entries(crewCount)
@@ -506,19 +523,19 @@ function StatsView({ crew, flights, onBack, c }) {
       return { id, count, name: m ? m.nickname : id, fullName: m ? m.name : "" };
     });
 
-  // Most flown routes (top 5)
+  // Most flown routes (top 5) — deduplicated: same flight by multiple crew = 1
   const routeCount = {};
-  flights.forEach(f => { if (f.route) routeCount[f.route] = (routeCount[f.route] || 0) + 1; });
+  uniqueFlights.forEach(f => { if (f.route) routeCount[f.route] = (routeCount[f.route] || 0) + 1; });
   const topRoutes = Object.entries(routeCount).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-  // Aircraft usage
+  // Aircraft usage — deduplicated: same flight by multiple crew = 1
   const acCount = {};
-  flights.forEach(f => { if (f.aircraft) acCount[f.aircraft] = (acCount[f.aircraft] || 0) + 1; });
+  uniqueFlights.forEach(f => { if (f.aircraft) acCount[f.aircraft] = (acCount[f.aircraft] || 0) + 1; });
   const topAc = Object.entries(acCount).sort((a, b) => b[1] - a[1]);
 
-  // Flights by month (last 6)
+  // Flights by month (last 6) — deduplicated
   const monthCount = {};
-  flights.forEach(f => {
+  uniqueFlights.forEach(f => {
     if (f.date) { const m = f.date.slice(0, 7); monthCount[m] = (monthCount[m] || 0) + 1; }
   });
   const months = Object.entries(monthCount).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 6);
@@ -582,9 +599,9 @@ function StatsView({ crew, flights, onBack, c }) {
 
         {/* Overview row */}
         <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-          <StatCard icon="✈" value={totalFlights} label="FLIGHTS" />
-          <StatCard icon="👥" value={uniqueCrew}   label="CREW"    />
-          <StatCard icon="🗺" value={uniqueRoutes} label="ROUTES"  />
+          <StatCard icon="✈" value={totalFlights}       label="LOG ENTRIES" />
+          <StatCard icon="🛫" value={uniqueFlights.length} label="FLIGHTS"   />
+          <StatCard icon="🗺" value={uniqueRoutes}       label="ROUTES"      />
         </div>
 
         {totalFlights === 0 ? (
@@ -619,7 +636,7 @@ function StatsView({ crew, flights, onBack, c }) {
             )}
 
             {/* Top Routes */}
-            {topRoutes.length > 0 && (
+            {showRouteStats && topRoutes.length > 0 && (
               <Sect label="熱門航線 TOP ROUTES" c={c}>
                 <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
                   {topRoutes.map(([route, count]) => (
@@ -630,7 +647,7 @@ function StatsView({ crew, flights, onBack, c }) {
             )}
 
             {/* Aircraft */}
-            {topAc.length > 0 && (
+            {showAcStats && topAc.length > 0 && (
               <Sect label="機型統計 AIRCRAFT" c={c}>
                 <div style={{ display: "flex", gap: 8 }}>
                   {topAc.map(([ac, count]) => (
@@ -727,6 +744,9 @@ function SettingsView({
   const [usageData,        setUsageData]        = useState({});
   const [regOpen,          setRegOpen]          = useState(false);   // local copy of toggle
   const [regOpenLoading,   setRegOpenLoading]   = useState(false);
+  const [showAcStats,      setShowAcStats]      = useState(true);    // aircraft stats visible
+  const [showRouteStats,   setShowRouteStats]   = useState(true);    // top routes visible
+  const [statsToggleLoading, setStatsToggleLoading] = useState(false);
 
   const isAdmin = username === "adminsetup";
 
@@ -753,7 +773,12 @@ function SettingsView({
       .then(([accSnap, usageSnap, settSnap]) => {
         setAccounts(accSnap.exists()   ? (accSnap.data().accounts   || {}) : {});
         setUsageData(usageSnap.exists() ? (usageSnap.data().usage   || {}) : {});
-        setRegOpen(settSnap.exists()   ? (settSnap.data().registrationOpen === true) : false);
+        if (settSnap.exists()) {
+          const s = settSnap.data();
+          setRegOpen(s.registrationOpen === true);
+          setShowAcStats(s.showAcStats    !== false); // default true
+          setShowRouteStats(s.showRouteStats !== false); // default true
+        }
       })
       .catch(() => {})
       .finally(() => setAccsLoading(false));
@@ -798,10 +823,24 @@ function SettingsView({
   const toggleRegistration = async (val) => {
     setRegOpenLoading(true);
     try {
-      await setDoc(APP_SETTINGS_DOC, { registrationOpen: val });
+      const snap = await getDoc(APP_SETTINGS_DOC);
+      const curr = snap.exists() ? snap.data() : {};
+      await setDoc(APP_SETTINGS_DOC, { ...curr, registrationOpen: val });
       setRegOpen(val);
     } catch { /* silent */ }
     finally { setRegOpenLoading(false); }
+  };
+
+  /** Toggle a stats visibility flag in Firestore (admin only) */
+  const toggleStatsSetting = async (key, val, setter) => {
+    setStatsToggleLoading(true);
+    try {
+      const snap = await getDoc(APP_SETTINGS_DOC);
+      const curr = snap.exists() ? snap.data() : {};
+      await setDoc(APP_SETTINGS_DOC, { ...curr, [key]: val });
+      setter(val);
+    } catch { /* silent */ }
+    finally { setStatsToggleLoading(false); }
   };
 
   /** Change current user's password */
@@ -1210,7 +1249,7 @@ function SettingsView({
               </div>
 
               {/* Registration toggle */}
-              <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
+              <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14, marginBottom: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: c.text, marginBottom: 3 }}>
@@ -1223,25 +1262,39 @@ function SettingsView({
                       }
                     </div>
                   </div>
-                  {/* Toggle switch */}
                   <button
                     onClick={() => !regOpenLoading && toggleRegistration(!regOpen)}
                     disabled={regOpenLoading}
-                    style={{
-                      width: 52, height: 30, borderRadius: 15, border: "none", cursor: regOpenLoading ? "default" : "pointer",
-                      background: regOpen ? c.accent : c.pill,
-                      position: "relative", flexShrink: 0, transition: "background 0.2s",
-                    }}
+                    style={{ width: 52, height: 30, borderRadius: 15, border: "none", cursor: regOpenLoading ? "default" : "pointer", background: regOpen ? c.accent : c.pill, position: "relative", flexShrink: 0, transition: "background 0.2s" }}
                   >
-                    <div style={{
-                      position: "absolute", top: 3, left: regOpen ? 25 : 3,
-                      width: 24, height: 24, borderRadius: "50%",
-                      background: regOpen ? c.adk : c.sub,
-                      transition: "left 0.2s",
-                    }} />
+                    <div style={{ position: "absolute", top: 3, left: regOpen ? 25 : 3, width: 24, height: 24, borderRadius: "50%", background: regOpen ? c.adk : c.sub, transition: "left 0.2s" }} />
                   </button>
                 </div>
               </div>
+
+              {/* Stats visibility toggles */}
+              {[
+                { key: "showAcStats",    val: showAcStats,    setter: setShowAcStats,    label: "機型統計 Aircraft Stats",  sub: "Show aircraft breakdown in Statistics" },
+                { key: "showRouteStats", val: showRouteStats, setter: setShowRouteStats, label: "熱門航線 Top Routes",       sub: "Show top routes chart in Statistics" },
+              ].map(({ key, val, setter, label, sub }) => (
+                <div key={key} style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14, marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: c.text, marginBottom: 3 }}>
+                        {val ? `✅ ${label}` : `🚫 ${label}`}
+                      </div>
+                      <div style={{ fontSize: 11, color: c.sub }}>{sub}</div>
+                    </div>
+                    <button
+                      onClick={() => !statsToggleLoading && toggleStatsSetting(key, !val, setter)}
+                      disabled={statsToggleLoading}
+                      style={{ width: 52, height: 30, borderRadius: 15, border: "none", cursor: statsToggleLoading ? "default" : "pointer", background: val ? c.accent : c.pill, position: "relative", flexShrink: 0, transition: "background 0.2s" }}
+                    >
+                      <div style={{ position: "absolute", top: 3, left: val ? 25 : 3, width: 24, height: 24, borderRadius: "50%", background: val ? c.adk : c.sub, transition: "left 0.2s" }} />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </Sect>
 
             {/* ── Activity Monitor ── */}
@@ -2045,6 +2098,8 @@ export default function App() {
   const [regErr,          setRegErr]          = useState("");
   const [regLoading,      setRegLoading]      = useState(false);
   const [registrationOpen, setRegistrationOpen] = useState(false); // fetched from Firestore
+  const [appShowAcStats,    setAppShowAcStats]    = useState(true);  // fetched from Firestore
+  const [appShowRouteStats, setAppShowRouteStats] = useState(true);  // fetched from Firestore
   // forgot-password flow
   const [forgotUser,      setForgotUser]      = useState("");
   const [forgotErr,       setForgotErr]       = useState("");
@@ -2130,9 +2185,14 @@ export default function App() {
     const layer1 = localStorage.getItem("cl-auth");
     const layer2 = localStorage.getItem("cl-auth2");
     const saved  = localStorage.getItem("cl-username");
-    // Fetch registration toggle in parallel (non-blocking)
+    // Fetch registration toggle + stats flags in parallel (non-blocking)
     getDoc(APP_SETTINGS_DOC).then(snap => {
-      if (snap.exists()) setRegistrationOpen(snap.data().registrationOpen === true);
+      if (snap.exists()) {
+        const s = snap.data();
+        setRegistrationOpen(s.registrationOpen === true);
+        setAppShowAcStats(s.showAcStats    !== false);
+        setAppShowRouteStats(s.showRouteStats !== false);
+      }
     }).catch(() => {});
     if (layer1 === "ok" && layer2 === "ok" && saved) { setUsername(saved); setAuthStep("app"); }
     else if (layer1 === "ok")                         { setAuthStep("personal"); }
@@ -3525,7 +3585,7 @@ export default function App() {
         )}
 
         {view === "stats" && (
-          <StatsView crew={crew} flights={flights} onBack={() => setView("settings")} c={c} />
+          <StatsView crew={crew} flights={flights} onBack={() => setView("settings")} showAcStats={appShowAcStats} showRouteStats={appShowRouteStats} c={c} />
         )}
 
         {view === "settings" && (
