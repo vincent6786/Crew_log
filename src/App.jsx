@@ -128,6 +128,12 @@ const RESETS_DOC = doc(db, "crewlog", "resets");
  */
 const USAGE_DOC = doc(db, "crewlog", "usage");
 
+/**
+ * App-wide settings doc — admin-controlled flags.
+ * Shape: { registrationOpen: boolean }
+ */
+const APP_SETTINGS_DOC = doc(db, "crewlog", "appSettings");
+
 /** Per-user private Firestore document — holds flights[] visible only to owner. */
 const flightDoc = (username) => doc(db, "crewlog", `flights-${username}`);
 
@@ -718,7 +724,9 @@ function SettingsView({
   const [changePwErr,    setChangePwErr]    = useState("");
   const [changePwOk,     setChangePwOk]     = useState("");
   // Usage tracking (admin-only — no private content)
-  const [usageData,      setUsageData]      = useState({});
+  const [usageData,        setUsageData]        = useState({});
+  const [regOpen,          setRegOpen]          = useState(false);   // local copy of toggle
+  const [regOpenLoading,   setRegOpenLoading]   = useState(false);
 
   const isAdmin = username === "adminsetup";
 
@@ -739,12 +747,13 @@ function SettingsView({
     width:        "100%",
   };
 
-  // ── Load accounts + usage from Firestore on mount ───────────────────────
+  // ── Load accounts + usage + appSettings from Firestore on mount ────────────────
   useEffect(() => {
-    Promise.all([getDoc(ACCOUNTS_DOC), getDoc(USAGE_DOC)])
-      .then(([accSnap, usageSnap]) => {
+    Promise.all([getDoc(ACCOUNTS_DOC), getDoc(USAGE_DOC), getDoc(APP_SETTINGS_DOC)])
+      .then(([accSnap, usageSnap, settSnap]) => {
         setAccounts(accSnap.exists()   ? (accSnap.data().accounts   || {}) : {});
         setUsageData(usageSnap.exists() ? (usageSnap.data().usage   || {}) : {});
+        setRegOpen(settSnap.exists()   ? (settSnap.data().registrationOpen === true) : false);
       })
       .catch(() => {})
       .finally(() => setAccsLoading(false));
@@ -783,6 +792,16 @@ function SettingsView({
     await setDoc(ACCOUNTS_DOC, { accounts: updated });
     setAccounts(updated);
     setDelAccConfirm("");
+  };
+
+  /** Toggle the open-registration flag in Firestore (admin only) */
+  const toggleRegistration = async (val) => {
+    setRegOpenLoading(true);
+    try {
+      await setDoc(APP_SETTINGS_DOC, { registrationOpen: val });
+      setRegOpen(val);
+    } catch { /* silent */ }
+    finally { setRegOpenLoading(false); }
   };
 
   /** Change current user's password */
@@ -892,12 +911,33 @@ function SettingsView({
         {/* ── Account ── */}
         <Sect label="帳號 ACCOUNT" c={c}>
           <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: nameEdit ? 12 : 0 }}>
+            {/* Username + flight count */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <span style={{ fontSize: 22 }}>👤</span>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 16, fontWeight: 800, color: c.text }}>{username}</div>
                 <div style={{ fontSize: 11, color: c.sub }}>{flights.length} 筆私人飛行紀錄</div>
               </div>
+            </div>
+            {/* Registered email — read-only reminder */}
+            {(() => {
+              const acct  = typeof accounts[username] === "object" ? accounts[username] : { email: "" };
+              const email = acct?.email || "";
+              return (
+                <div style={{ background: c.cardAlt, borderRadius: 10, padding: "9px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 14 }}>✉️</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 10, letterSpacing: 1, color: c.sub, fontWeight: 700, marginBottom: 2 }}>登記電郵 REGISTERED EMAIL</div>
+                    {email
+                      ? <div style={{ fontSize: 13, color: c.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email}</div>
+                      : <div style={{ fontSize: 12, color: "#FF453A" }}>⚠ 未設定 — 無法使用忘記密碼功能</div>
+                    }
+                  </div>
+                </div>
+              );
+            })()}
+            {/* Name-edit section */}
+            <div style={{ marginTop: 10 }}>
               <button
                 onClick={() => { setNameEdit(!nameEdit); setTempName(username); setNameErr(""); }}
                 style={{ background: c.pill, border: "none", color: c.accent, borderRadius: 8, padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
@@ -906,7 +946,7 @@ function SettingsView({
               </button>
             </div>
             {nameEdit && (
-              <div>
+              <div style={{ marginTop: 10 }}>
                 <ClearableInput
                   value={tempName}
                   onChange={e => setTempName(e.target.value)}
@@ -1069,20 +1109,8 @@ function SettingsView({
         {/* ── Data Management ── */}
         <Sect label="資料管理 DATA" c={c}>
           <SettingsRow icon="⬇" label="備份資料 Backup" sub="下載 JSON 備份檔"       onClick={onExport}                  c={c} />
-          <SettingsRow icon="✉️" label="電郵摘要 Email Summary" sub="發送飛行紀錄摘要至你的電郵"  onClick={emailBackup}  c={c} />
           <SettingsRow icon="📤" label="匯入備份 Import" sub="從 JSON 檔案還原資料"  onClick={() => fileRef.current?.click()} c={c} />
           <input ref={fileRef} type="file" accept=".json" onChange={handleImportFile} style={{ display: "none" }} />
-          {emailBakMsg && (
-            <div style={{
-              background:   emailBakMsg.startsWith("✅") ? "rgba(48,209,88,0.1)"  : emailBakMsg === "發送中..." ? "rgba(245,183,49,0.1)" : "rgba(255,69,58,0.1)",
-              border:       `1px solid ${emailBakMsg.startsWith("✅") ? "rgba(48,209,88,0.4)" : emailBakMsg === "發送中..." ? "rgba(245,183,49,0.4)" : "rgba(255,69,58,0.4)"}`,
-              borderRadius: 10, padding: "8px 12px", fontSize: 13, fontWeight: 600,
-              color:        emailBakMsg.startsWith("✅") ? "#30D158" : emailBakMsg === "發送中..." ? "#F5B731" : "#FF453A",
-              marginBottom: 8,
-            }}>
-              {emailBakMsg}
-            </div>
-          )}
           {importMsg && (
             <div style={{
               background:   importMsg.startsWith("✅") ? "rgba(48,209,88,0.1)"  : "rgba(255,69,58,0.1)",
@@ -1164,6 +1192,58 @@ function SettingsView({
         {/* ── Account Management (admin only) ── */}
         {isAdmin && (
           <>
+            {/* ── Admin Overview ── */}
+            <Sect label="管理員概覽 ADMIN OVERVIEW" c={c}>
+              {/* Account counter */}
+              <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 16, marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ background: c.accent, borderRadius: 12, width: 48, height: 48, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <span style={{ fontSize: 22 }}>👥</span>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 28, fontWeight: 900, color: c.text, lineHeight: 1 }}>
+                      {accsLoading ? "—" : Object.keys(accounts).length}
+                    </div>
+                    <div style={{ fontSize: 11, color: c.sub, marginTop: 2 }}>帳號總數 Total Accounts</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Registration toggle */}
+              <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: c.text, marginBottom: 3 }}>
+                      {regOpen ? "✅ 開放註冊中" : "🔒 註冊已關閉"}
+                    </div>
+                    <div style={{ fontSize: 11, color: c.sub, lineHeight: 1.5 }}>
+                      {regOpen
+                        ? "New users can create their own account from the login screen."
+                        : "Only admin can add accounts. Login shows \"Registration not available\"."
+                      }
+                    </div>
+                  </div>
+                  {/* Toggle switch */}
+                  <button
+                    onClick={() => !regOpenLoading && toggleRegistration(!regOpen)}
+                    disabled={regOpenLoading}
+                    style={{
+                      width: 52, height: 30, borderRadius: 15, border: "none", cursor: regOpenLoading ? "default" : "pointer",
+                      background: regOpen ? c.accent : c.pill,
+                      position: "relative", flexShrink: 0, transition: "background 0.2s",
+                    }}
+                  >
+                    <div style={{
+                      position: "absolute", top: 3, left: regOpen ? 25 : 3,
+                      width: 24, height: 24, borderRadius: "50%",
+                      background: regOpen ? c.adk : c.sub,
+                      transition: "left 0.2s",
+                    }} />
+                  </button>
+                </div>
+              </div>
+            </Sect>
+
             {/* ── Activity Monitor ── */}
             <Sect label="活動監控 ACTIVITY MONITOR 🛡" c={c}>
               <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
@@ -1948,7 +2028,7 @@ export default function App() {
   const gs = makeGlobalStyles(c, dark);
 
   // ── §13.2  Auth state ─────────────────────────────────────────────────────
-  // authStep: "loading" | "passcode" | "personal" | "forgot" | "otp" | "resetpw" | "app"
+  // authStep: "loading" | "passcode" | "personal" | "register" | "forgot" | "otp" | "resetpw" | "app"
   const [authStep,        setAuthStep]        = useState("loading");
   const [username,        setUsername]        = useState("");
   const [passcodeInput,   setPasscodeInput]   = useState("");
@@ -1957,6 +2037,14 @@ export default function App() {
   const [personalPwInput, setPersonalPwInput] = useState("");
   const [personalErr,     setPersonalErr]     = useState("");
   const [personalLoading, setPersonalLoading] = useState(false);
+  // registration flow
+  const [regUser,         setRegUser]         = useState("");
+  const [regPass,         setRegPass]         = useState("");
+  const [regPassConf,     setRegPassConf]     = useState("");
+  const [regEmail,        setRegEmail]        = useState("");
+  const [regErr,          setRegErr]          = useState("");
+  const [regLoading,      setRegLoading]      = useState(false);
+  const [registrationOpen, setRegistrationOpen] = useState(false); // fetched from Firestore
   // forgot-password flow
   const [forgotUser,      setForgotUser]      = useState("");
   const [forgotErr,       setForgotErr]       = useState("");
@@ -2042,6 +2130,10 @@ export default function App() {
     const layer1 = localStorage.getItem("cl-auth");
     const layer2 = localStorage.getItem("cl-auth2");
     const saved  = localStorage.getItem("cl-username");
+    // Fetch registration toggle in parallel (non-blocking)
+    getDoc(APP_SETTINGS_DOC).then(snap => {
+      if (snap.exists()) setRegistrationOpen(snap.data().registrationOpen === true);
+    }).catch(() => {});
     if (layer1 === "ok" && layer2 === "ok" && saved) { setUsername(saved); setAuthStep("app"); }
     else if (layer1 === "ok")                         { setAuthStep("personal"); }
     else                                              { setAuthStep("passcode"); }
@@ -2198,6 +2290,48 @@ export default function App() {
       setPersonalErr("連線失敗 Connection error — try again");
     } finally {
       setPersonalLoading(false);
+    }
+  };
+
+  /**
+   * Self-registration — only allowed when admin has toggled registrationOpen = true.
+   * Creates a new account in ACCOUNTS_DOC. Username must be unique.
+   * Existing flight data (e.g. flights-Sophie) connects automatically by matching username.
+   */
+  const submitRegister = async () => {
+    const uname = regUser.trim();
+    const pass  = regPass.trim();
+    const email = regEmail.trim();
+    if (!uname)          { setRegErr("請輸入用戶名 Enter username");      return; }
+    if (uname.length > 20) { setRegErr("用戶名太長 Username too long");  return; }
+    if (!pass)           { setRegErr("請輸入密碼 Enter password");         return; }
+    if (pass.length < 6) { setRegErr("密碼至少 6 位 Min 6 characters");   return; }
+    if (pass !== regPassConf) { setRegErr("密碼不一致 Passwords don't match"); return; }
+    if (!email)          { setRegErr("請輸入電郵 Enter email");            return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setRegErr("電郵格式錯誤 Invalid email"); return; }
+    if (uname === "adminsetup") { setRegErr("此用戶名不可用 Username not allowed"); return; }
+
+    setRegLoading(true);
+    setRegErr("");
+    try {
+      const snap     = await getDoc(ACCOUNTS_DOC);
+      const accounts = snap.exists() ? (snap.data().accounts || {}) : {};
+      const normalised = Object.fromEntries(
+        Object.entries(accounts).map(([k, v]) => [k, typeof v === "object" ? v : { password: v, email: "" }])
+      );
+      if (normalised[uname]) { setRegErr(`"${uname}" 已被使用 Username already taken — choose another`); return; }
+
+      const updated = { ...normalised, [uname]: { password: pass, email } };
+      await setDoc(ACCOUNTS_DOC, { accounts: updated });
+      localStorage.setItem("cl-auth2", "ok");
+      localStorage.setItem("cl-username", uname);
+      setUsername(uname);
+      await recordLogin(uname);
+      setAuthStep("app");
+    } catch {
+      setRegErr("連線失敗 Connection error — try again");
+    } finally {
+      setRegLoading(false);
     }
   };
 
@@ -2634,12 +2768,103 @@ export default function App() {
             忘記密碼？ Forgot password?
           </button>
 
+          {/* Create account — only shown when admin enables registration */}
+          {registrationOpen ? (
+            <button
+              onClick={() => { setRegUser(""); setRegPass(""); setRegPassConf(""); setRegEmail(""); setRegErr(""); setAuthStep("register"); }}
+              style={{ width: "100%", background: "none", border: `1px solid ${c.border}`, borderRadius: 10, color: c.text, cursor: "pointer", fontSize: 13, marginTop: 10, fontFamily: "inherit", fontWeight: 700, padding: "10px" }}
+            >
+              ✨ 建立帳號 Create Account
+            </button>
+          ) : (
+            <div style={{ textAlign: "center", fontSize: 11, color: c.sub, marginTop: 12, opacity: 0.6 }}>
+              註冊暫未開放 Registration currently not available
+            </div>
+          )}
+
           {/* Back to layer 1 */}
           <button
             onClick={() => { localStorage.removeItem("cl-auth"); setAuthStep("passcode"); setPersonalErr(""); }}
             style={{ width: "100%", background: "none", border: "none", color: c.sub, cursor: "pointer", fontSize: 12, marginTop: 6, fontFamily: "inherit" }}
           >
             ← 返回 Back
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Create Account screen ───────────────────────────────────────────────
+  if (authStep === "register") return (
+    <div style={{ background: c.bg, minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, overflowX: "hidden" }}>
+      <style>{gs}</style>
+      <div style={{ width: "100%", maxWidth: 360 }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <img src="/logo.png" alt="CrewLog" style={{ width: 72, height: 72, objectFit: "contain", marginBottom: 12, borderRadius: 16 }} />
+          <div style={{ fontSize: 22, fontWeight: 800, color: c.text }}>建立帳號</div>
+          <div style={{ fontSize: 13, color: c.sub, marginTop: 8, lineHeight: 1.6 }}>
+            Create your personal CrewLog account.<br />
+            <span style={{ color: c.accent, fontWeight: 700 }}>Your flight logs are private to you only.</span>
+          </div>
+        </div>
+        <div style={{ background: c.card, borderRadius: 20, padding: 24, border: `1px solid ${c.border}` }}>
+
+          <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>用戶名 USERNAME</div>
+          <ClearableInput
+            value={regUser}
+            onChange={e => { setRegUser(e.target.value); setRegErr(""); }}
+            placeholder="Choose a username"
+            autoFocus
+            autoComplete="off"
+            style={{ ...inp, marginBottom: 14, fontSize: 15, textAlign: "center" }}
+            c={c}
+          />
+
+          <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>密碼 PASSWORD</div>
+          <ClearableInput
+            type="password"
+            value={regPass}
+            onChange={e => { setRegPass(e.target.value); setRegErr(""); }}
+            placeholder="Min 6 characters"
+            autoComplete="new-password"
+            style={{ ...inp, marginBottom: 8, fontSize: 16, letterSpacing: 4, textAlign: "center" }}
+            c={c}
+          />
+          <ClearableInput
+            type="password"
+            value={regPassConf}
+            onChange={e => { setRegPassConf(e.target.value); setRegErr(""); }}
+            placeholder="Confirm password"
+            autoComplete="new-password"
+            style={{ ...inp, marginBottom: 14, fontSize: 16, letterSpacing: 4, textAlign: "center" }}
+            c={c}
+          />
+
+          <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>電郵 EMAIL <span style={{ fontWeight: 400, opacity: 0.6 }}>for password reset</span></div>
+          <ClearableInput
+            value={regEmail}
+            onChange={e => { setRegEmail(e.target.value); setRegErr(""); }}
+            onKeyDown={e => e.key === "Enter" && submitRegister()}
+            placeholder="your@email.com"
+            type="email"
+            autoComplete="email"
+            style={{ ...inp, marginBottom: regErr ? 8 : 18, fontSize: 14, textAlign: "center" }}
+            c={c}
+          />
+          {regErr && <div style={{ color: "#FF453A", fontSize: 12, marginBottom: 12, textAlign: "center" }}>{regErr}</div>}
+
+          <button
+            onClick={submitRegister}
+            disabled={regLoading}
+            style={{ width: "100%", background: regLoading ? c.pill : c.accent, color: regLoading ? c.sub : c.adk, border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 800, cursor: regLoading ? "default" : "pointer", fontFamily: "inherit" }}
+          >
+            {regLoading ? "建立中..." : "✨ 建立帳號 Create Account"}
+          </button>
+          <button
+            onClick={() => { setRegErr(""); setAuthStep("personal"); }}
+            style={{ width: "100%", background: "none", border: "none", color: c.sub, cursor: "pointer", fontSize: 12, marginTop: 12, fontFamily: "inherit" }}
+          >
+            ← 返回登入 Back to login
           </button>
         </div>
       </div>
