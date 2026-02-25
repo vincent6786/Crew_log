@@ -569,10 +569,10 @@ function StatsView({ crew, flights, onBack, c }) {
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden" }}>
       <NavBar sub="STATISTICS" title="飛行統計 📊" onBack={onBack} c={c} />
 
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 40px", WebkitOverflowScrolling: "touch" }}>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 100px", WebkitOverflowScrolling: "touch" }}>
 
         {/* Overview row */}
         <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
@@ -699,6 +699,7 @@ function SettingsView({
   const [tempName,     setTempName]     = useState(username);
   const [nameErr,      setNameErr]      = useState("");
   const [importMsg,    setImportMsg]    = useState("");
+  const [emailBakMsg,  setEmailBakMsg]  = useState("");
 
   // ── Account management state ─────────────────────────────────────────────
   const [accounts,       setAccounts]       = useState({});
@@ -839,6 +840,39 @@ function SettingsView({
   };
 
   /** Adds a new custom tag (with # prefix normalisation and duplicate check). */
+  /** Sends a JSON backup to the user's registered email via EmailJS */
+  const emailBackup = async () => {
+    setEmailBakMsg("發送中...");
+    try {
+      // Get user's email from accounts doc
+      const snap     = await getDoc(ACCOUNTS_DOC);
+      const accounts = snap.exists() ? (snap.data().accounts || {}) : {};
+      const acct     = typeof accounts[username] === "object" ? accounts[username] : { email: "" };
+      const email    = acct.email || "";
+      if (!email) {
+        setEmailBakMsg("❌ 未設定電郵 No email on file — ask admin to add one");
+        setTimeout(() => setEmailBakMsg(""), 4000);
+        return;
+      }
+      const data    = { crew: "hidden", flights: `${flights.length} entries`, routes: "hidden", exportedAt: new Date().toISOString(), note: "Full backup available via Download Backup button." };
+      const summary = `You have ${flights.length} private flight log entries as of ${new Date().toLocaleDateString()}.`;
+      await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          service_id:  EMAILJS_SERVICE_ID,
+          template_id: EMAILJS_TEMPLATE_ID,
+          user_id:     EMAILJS_PUBLIC_KEY,
+          template_params: { to_email: email, username, otp_code: summary },
+        }),
+      });
+      setEmailBakMsg(`✅ 摘要已發送至 ${email}`);
+    } catch {
+      setEmailBakMsg("❌ 發送失敗 Send failed");
+    }
+    setTimeout(() => setEmailBakMsg(""), 4000);
+  };
+
   const addCustomTag = () => {
     const tag = newTag.trim().startsWith("#") ? newTag.trim() : `#${newTag.trim()}`;
     if (!tag || tag === "#") return;
@@ -850,10 +884,10 @@ function SettingsView({
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden" }}>
       <NavBar sub="SETTINGS" title="設定 ⚙" onBack={onBack} c={c} />
 
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 40px", WebkitOverflowScrolling: "touch" }}>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 100px", WebkitOverflowScrolling: "touch" }}>
 
         {/* ── Account ── */}
         <Sect label="帳號 ACCOUNT" c={c}>
@@ -1035,8 +1069,20 @@ function SettingsView({
         {/* ── Data Management ── */}
         <Sect label="資料管理 DATA" c={c}>
           <SettingsRow icon="⬇" label="備份資料 Backup" sub="下載 JSON 備份檔"       onClick={onExport}                  c={c} />
+          <SettingsRow icon="✉️" label="電郵摘要 Email Summary" sub="發送飛行紀錄摘要至你的電郵"  onClick={emailBackup}  c={c} />
           <SettingsRow icon="📤" label="匯入備份 Import" sub="從 JSON 檔案還原資料"  onClick={() => fileRef.current?.click()} c={c} />
           <input ref={fileRef} type="file" accept=".json" onChange={handleImportFile} style={{ display: "none" }} />
+          {emailBakMsg && (
+            <div style={{
+              background:   emailBakMsg.startsWith("✅") ? "rgba(48,209,88,0.1)"  : emailBakMsg === "發送中..." ? "rgba(245,183,49,0.1)" : "rgba(255,69,58,0.1)",
+              border:       `1px solid ${emailBakMsg.startsWith("✅") ? "rgba(48,209,88,0.4)" : emailBakMsg === "發送中..." ? "rgba(245,183,49,0.4)" : "rgba(255,69,58,0.4)"}`,
+              borderRadius: 10, padding: "8px 12px", fontSize: 13, fontWeight: 600,
+              color:        emailBakMsg.startsWith("✅") ? "#30D158" : emailBakMsg === "發送中..." ? "#F5B731" : "#FF453A",
+              marginBottom: 8,
+            }}>
+              {emailBakMsg}
+            </div>
+          )}
           {importMsg && (
             <div style={{
               background:   importMsg.startsWith("✅") ? "rgba(48,209,88,0.1)"  : "rgba(255,69,58,0.1)",
@@ -1338,7 +1384,7 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden" }}>
       <NavBar
         sub={editFlightId ? "EDIT LOG" : "QUICK-LOG"}
         title={editFlightId ? "編輯飛行紀錄" : "新增飛行紀錄"}
@@ -1346,7 +1392,7 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
         c={c}
       />
 
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 40px", WebkitOverflowScrolling: "touch" }}>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 100px", WebkitOverflowScrolling: "touch" }}>
 
         {/* ── Crew Search ── */}
         <Sect label="組員 CREW MEMBER" c={c}>
@@ -1444,7 +1490,7 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
             <div style={{ background: c.cardAlt, border: `1px solid ${c.border}`, borderRadius: 12, padding: 12, marginBottom: 10 }}>
               <div style={{ fontSize: 9, letterSpacing: 3, color: c.accent, fontWeight: 700, marginBottom: 8 }}>ADD ROUTE</div>
               <ClearableInput value={rf.num}   onChange={e => setRf(r => ({ ...r, num:   e.target.value }))} placeholder="航班號 e.g. CI001"    autoComplete="off" style={{ ...inp, marginBottom: 6, borderRadius: 10, padding: "8px 12px", fontSize: 13 }} c={c} />
-              <ClearableInput value={rf.route} onChange={e => setRf(r => ({ ...r, route: e.target.value }))} placeholder="航線 e.g. TPE→NRT" autoComplete="off" style={{ ...inp, marginBottom: 6, borderRadius: 10, padding: "8px 12px", fontSize: 13 }} c={c} />
+              <ClearableInput value={rf.route} onChange={e => setRf(r => ({ ...r, route: e.target.value.toUpperCase() }))} placeholder="航線 e.g. TPE→NRT" autoComplete="off" style={{ ...inp, marginBottom: 6, borderRadius: 10, padding: "8px 12px", fontSize: 13 }} c={c} />
               <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                 {AIRCRAFT.map(a => (
                   <button
@@ -1465,8 +1511,8 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
 
           {/* Manual entry fields */}
           <div style={{ display: "flex", gap: 8 }}>
-            <ClearableInput value={form.flightNum} onChange={e => setForm(f => ({ ...f, flightNum: e.target.value }))} placeholder="航班號 No."  autoComplete="off" style={{ ...inp, width: "auto", flex: 1 }} c={c} />
-            <ClearableInput value={form.route}     onChange={e => setForm(f => ({ ...f, route:     e.target.value }))} placeholder="航線 Route" autoComplete="off" style={{ ...inp, width: "auto", flex: 1 }} c={c} />
+            <ClearableInput value={form.flightNum} onChange={e => setForm(f => ({ ...f, flightNum: e.target.value.toUpperCase() }))} placeholder="航班號 No."  autoComplete="off" style={{ ...inp, width: "auto", flex: 1 }} c={c} />
+            <ClearableInput value={form.route}     onChange={e => setForm(f => ({ ...f, route:     e.target.value.toUpperCase() }))} placeholder="航線 Route" autoComplete="off" style={{ ...inp, width: "auto", flex: 1 }} c={c} />
           </div>
         </Sect>
 
@@ -1655,10 +1701,10 @@ function GuideView({ onBack, c }) {
   ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden" }}>
       <NavBar sub="USER GUIDE" title="使用說明 ✈" onBack={onBack} c={c} />
 
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 40px", WebkitOverflowScrolling: "touch" }}>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 100px", WebkitOverflowScrolling: "touch" }}>
         {/* Hero banner */}
         <div style={{
           background:   `linear-gradient(135deg, ${c.accent}22, ${c.accent}08)`,
@@ -1742,7 +1788,7 @@ function MyLogView({ flights, crew, username, onBack, onGoProfile, onEdit, c }) 
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden" }}>
       <NavBar
         sub="MY LOGBOOK"
         title={`${username} 的飛行日誌`}
@@ -1770,7 +1816,7 @@ function MyLogView({ flights, crew, username, onBack, onGoProfile, onEdit, c }) 
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 48px", WebkitOverflowScrolling: "touch" }}>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "16px 16px 100px", WebkitOverflowScrolling: "touch" }}>
 
         {/* Empty states */}
         {flights.length === 0 ? (
@@ -1949,6 +1995,7 @@ export default function App() {
   // ── §13.7  QuickLog form state ────────────────────────────────────────────
   const [qlInitialForm,  setQlInitialForm]  = useState({ ...EMPTY_FORM, date: today() });
   const [qlEditFlightId, setQlEditFlightId] = useState(null); // null = new, string = editing
+  const [qlReturnView,   setQlReturnView]   = useState("dashboard"); // where to go after save
 
   // ── §13.8  Dashboard UI state ─────────────────────────────────────────────
   const [search,    setSearch]    = useState("");
@@ -2336,7 +2383,7 @@ export default function App() {
    * @param {string|null} crewId       — pre-select a crew member (new log)
    * @param {Object|null} flightToEdit — existing flight entry to edit
    */
-  const openQL = (crewId = null, flightToEdit = null) => {
+  const openQL = (crewId = null, flightToEdit = null, returnView = null) => {
     if (flightToEdit) {
       // Editing an existing log — populate all fields, lock crew selector
       const m = crew.find(x => x.id === flightToEdit.crewId);
@@ -2363,6 +2410,7 @@ export default function App() {
       setQlInitialForm(f);
       setQlEditFlightId(null);
     }
+    setQlReturnView(returnView || (profileId ? "profile" : "dashboard"));
     setView("quicklog");
   };
 
@@ -2411,8 +2459,8 @@ export default function App() {
     }
 
     setQlEditFlightId(null);
-    // Return to profile if we came from there, otherwise dashboard
-    setView(profileId === form.crewId ? "profile" : "dashboard");
+    // Return to the view we came from
+    setView(qlReturnView);
   };
 
 
@@ -2746,7 +2794,7 @@ export default function App() {
   // NOTE: Declared as a function (not a component) so it shares App's state.
   // ─────────────────────────────────────────────────────────────────────────
   const DashView = () => (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden" }}>
 
       {/* ── Header ── */}
       <div style={{ padding: "18px 16px 12px", background: c.card, borderBottom: `1px solid ${c.border}`, flexShrink: 0 }}>
@@ -2963,7 +3011,7 @@ export default function App() {
     const si = m.status ? STATUS_MAP[m.status] : null;
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden" }}>
 
         {/* ── Profile header ── */}
         <div style={{ padding: "16px 16px 14px", background: si ? si.bg : c.card, borderBottom: `2px solid ${si ? si.border : c.border}`, flexShrink: 0 }}>
@@ -3021,7 +3069,7 @@ export default function App() {
         </div>
 
         {/* ── Profile body ── */}
-        <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "14px 16px 32px", WebkitOverflowScrolling: "touch" }}>
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "14px 16px 100px", WebkitOverflowScrolling: "touch" }}>
 
           {/* Crew Info (shared — editable by anyone) */}
           <div style={{ marginBottom: 16 }}>
@@ -3225,7 +3273,7 @@ export default function App() {
             initialForm={qlInitialForm}
             editFlightId={qlEditFlightId}
             onSave={handleSaveLog}
-            onBack={() => { setView(profileId ? "profile" : "dashboard"); setQlEditFlightId(null); }}
+            onBack={() => { setView(qlReturnView); setQlEditFlightId(null); }}
             dark={dark}
             c={c}
             profileId={profileId}
@@ -3242,7 +3290,7 @@ export default function App() {
             username={username}
             onBack={() => setView("dashboard")}
             onGoProfile={(id) => { setProfileId(id); setView("profile"); }}
-            onEdit={(f) => { openQL(null, f); }}
+            onEdit={(f) => { openQL(null, f, "mylog"); }}
             c={c}
           />
         )}
