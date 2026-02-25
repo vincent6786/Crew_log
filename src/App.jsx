@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { db }                                        from "./firebase";
-import { doc, onSnapshot, setDoc }                   from "firebase/firestore";
+import { doc, onSnapshot, setDoc, getDoc }            from "firebase/firestore";
 import { INITIAL_CREW }                              from "./crewData";
 
 
@@ -17,8 +17,23 @@ import { INITIAL_CREW }                              from "./crewData";
 // §1  CONFIGURATION
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Single passcode that gates access to the entire app. */
+/** Shared passcode — layer 1 gate for all users. */
 const APP_PASSCODE = "crew2026";
+
+/**
+ * EmailJS configuration for password-reset OTP emails.
+ * Set these up at https://www.emailjs.com (free tier is fine).
+ * - EMAILJS_SERVICE_ID  : your Email Service ID (e.g. "service_xxxxxx")
+ * - EMAILJS_TEMPLATE_ID : your Email Template ID (e.g. "template_xxxxxx")
+ *   Template variables available: {{to_email}}, {{username}}, {{otp_code}}
+ * - EMAILJS_PUBLIC_KEY  : your Public Key (Account → API Keys)
+ */
+const EMAILJS_SERVICE_ID  = "service_cx54lij";
+const EMAILJS_TEMPLATE_ID = "template_4e8s9wq";
+const EMAILJS_PUBLIC_KEY  = "XRDslti28iokgIXKD";
+
+/** OTP expiry in milliseconds (15 minutes). */
+const OTP_EXPIRY_MS = 15 * 60 * 1000;
 
 /** Built-in tags (shown for all users, cannot be deleted). */
 const PRESET_TAGS = [
@@ -99,6 +114,19 @@ const LITE = {
 
 /** Shared Firestore document — holds crew[] and routes[] for ALL users. */
 const SHARED_DOC = doc(db, "crewlog", "shared");
+
+/** Accounts Firestore document — holds individual username→{password,email} map. */
+const ACCOUNTS_DOC = doc(db, "crewlog", "accounts");
+
+/** Password-reset OTPs — holds temporary codes: { [username]: { code, expiry } }. */
+const RESETS_DOC = doc(db, "crewlog", "resets");
+
+/**
+ * Usage tracking — public metadata only, NO private flight content.
+ * Shape: { [username]: { joinedAt, lastLogin, flightCount } }
+ * Admin can read this; nobody can read another user's actual flights.
+ */
+const USAGE_DOC = doc(db, "crewlog", "usage");
 
 /** Per-user private Firestore document — holds flights[] visible only to owner. */
 const flightDoc = (username) => doc(db, "crewlog", `flights-${username}`);
@@ -672,6 +700,27 @@ function SettingsView({
   const [nameErr,      setNameErr]      = useState("");
   const [importMsg,    setImportMsg]    = useState("");
 
+  // ── Account management state ─────────────────────────────────────────────
+  const [accounts,       setAccounts]       = useState({});
+  const [accsLoading,    setAccsLoading]    = useState(true);
+  const [newAccUser,     setNewAccUser]     = useState("");
+  const [newAccPass,     setNewAccPass]     = useState("");
+  const [newAccEmail,    setNewAccEmail]    = useState("");
+  const [newAccErr,      setNewAccErr]      = useState("");
+  const [newAccOk,       setNewAccOk]       = useState("");
+  const [delAccConfirm,  setDelAccConfirm]  = useState("");
+  // Change password
+  const [changePwOpen,   setChangePwOpen]   = useState(false);
+  const [changePwCur,    setChangePwCur]    = useState("");
+  const [changePwNew,    setChangePwNew]    = useState("");
+  const [changePwConf,   setChangePwConf]   = useState("");
+  const [changePwErr,    setChangePwErr]    = useState("");
+  const [changePwOk,     setChangePwOk]     = useState("");
+  // Usage tracking (admin-only — no private content)
+  const [usageData,      setUsageData]      = useState({});
+
+  const isAdmin = username === "adminsetup";
+
   const fileRef = useRef(null);
 
   const allTags = [...PRESET_TAGS, ...customTags];
@@ -689,7 +738,74 @@ function SettingsView({
     width:        "100%",
   };
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
+  // ── Load accounts + usage from Firestore on mount ───────────────────────
+  useEffect(() => {
+    Promise.all([getDoc(ACCOUNTS_DOC), getDoc(USAGE_DOC)])
+      .then(([accSnap, usageSnap]) => {
+        setAccounts(accSnap.exists()   ? (accSnap.data().accounts   || {}) : {});
+        setUsageData(usageSnap.exists() ? (usageSnap.data().usage   || {}) : {});
+      })
+      .catch(() => {})
+      .finally(() => setAccsLoading(false));
+  }, []);
+
+  /** Add a new account to Firestore */
+  const addAccount = async () => {
+    const u = newAccUser.trim();
+    const p = newAccPass.trim();
+    const e = newAccEmail.trim();
+    if (!u) { setNewAccErr("請輸入用戶名 Enter username"); return; }
+    if (!p) { setNewAccErr("請輸入密碼 Enter password");   return; }
+    if (p.length < 6) { setNewAccErr("密碼至少 6 位 Min 6 chars"); return; }
+    if (u.length > 20) { setNewAccErr("用戶名太長 Username too long"); return; }
+    // Normalise existing accounts to object format before checking
+    const existing = Object.fromEntries(
+      Object.entries(accounts).map(([k, v]) => [k, typeof v === "object" ? v : { password: v, email: "" }])
+    );
+    if (existing[u]) { setNewAccErr(`"${u}" 已存在 Username already taken — choose another`); return; }
+    if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) { setNewAccErr("電郵格式錯誤 Invalid email"); return; }
+    const updated = { ...existing, [u]: { password: p, email: e } };
+    await setDoc(ACCOUNTS_DOC, { accounts: updated });
+    setAccounts(updated);
+    setNewAccUser(""); setNewAccPass(""); setNewAccEmail(""); setNewAccErr("");
+    setNewAccOk(`✅ "${u}" 已新增 Added`);
+    setTimeout(() => setNewAccOk(""), 3000);
+  };
+
+  /** Delete an account from Firestore */
+  const deleteAccount = async (u) => {
+    const updated = Object.fromEntries(
+      Object.entries(accounts)
+        .filter(([k]) => k !== u)
+        .map(([k, v]) => [k, typeof v === "object" ? v : { password: v, email: "" }])
+    );
+    await setDoc(ACCOUNTS_DOC, { accounts: updated });
+    setAccounts(updated);
+    setDelAccConfirm("");
+  };
+
+  /** Change current user's password */
+  const changePassword = async () => {
+    if (!changePwCur)                         { setChangePwErr("請輸入現有密碼"); return; }
+    if (!changePwNew)                         { setChangePwErr("請輸入新密碼"); return; }
+    if (changePwNew.length < 6)               { setChangePwErr("密碼至少 6 位 Min 6 chars"); return; }
+    if (changePwNew !== changePwConf)         { setChangePwErr("密碼不一致 Passwords don't match"); return; }
+
+    const acct = typeof accounts[username] === "object"
+      ? accounts[username]
+      : { password: accounts[username], email: "" };
+    if (acct.password !== changePwCur) { setChangePwErr("現有密碼錯誤 Wrong current password"); return; }
+
+    const normalised = Object.fromEntries(
+      Object.entries(accounts).map(([k, v]) => [k, typeof v === "object" ? v : { password: v, email: "" }])
+    );
+    const updated = { ...normalised, [username]: { ...acct, password: changePwNew } };
+    await setDoc(ACCOUNTS_DOC, { accounts: updated });
+    setAccounts(updated);
+    setChangePwCur(""); setChangePwNew(""); setChangePwConf(""); setChangePwErr("");
+    setChangePwOk("✅ 密碼已更新 Password updated!");
+    setTimeout(() => { setChangePwOk(""); setChangePwOpen(false); }, 2500);
+  };
 
   /** Reads an imported JSON backup and passes it to the parent handler. */
   const handleImportFile = (e) => {
@@ -933,6 +1049,176 @@ function SettingsView({
             </div>
           )}
         </Sect>
+
+        {/* ── Change Password ── */}
+        <Sect label="更改密碼 CHANGE PASSWORD" c={c}>
+          <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
+            {!changePwOpen ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: c.text }}>🔑 {username}</div>
+                  <div style={{ fontSize: 11, color: c.sub, marginTop: 2 }}>更新你的登入密碼</div>
+                </div>
+                <button
+                  onClick={() => { setChangePwOpen(true); setChangePwErr(""); setChangePwOk(""); }}
+                  style={{ background: c.pill, border: "none", color: c.accent, borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}
+                >
+                  ✏ 更改
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 10, letterSpacing: 2, color: c.sub, fontWeight: 700, marginBottom: 10 }}>CHANGE PASSWORD</div>
+                <ClearableInput
+                  type="password"
+                  value={changePwCur}
+                  onChange={e => { setChangePwCur(e.target.value); setChangePwErr(""); }}
+                  placeholder="Current password"
+                  style={{ ...inp, marginBottom: 8, fontSize: 14 }}
+                  c={c}
+                />
+                <ClearableInput
+                  type="password"
+                  value={changePwNew}
+                  onChange={e => { setChangePwNew(e.target.value); setChangePwErr(""); }}
+                  placeholder="New password (min 6)"
+                  style={{ ...inp, marginBottom: 8, fontSize: 14 }}
+                  c={c}
+                />
+                <ClearableInput
+                  type="password"
+                  value={changePwConf}
+                  onChange={e => { setChangePwConf(e.target.value); setChangePwErr(""); }}
+                  onKeyDown={e => e.key === "Enter" && changePassword()}
+                  placeholder="Confirm new password"
+                  style={{ ...inp, marginBottom: changePwErr || changePwOk ? 8 : 12, fontSize: 14 }}
+                  c={c}
+                />
+                {changePwErr && <div style={{ color: "#FF453A",  fontSize: 11, marginBottom: 10 }}>{changePwErr}</div>}
+                {changePwOk  && <div style={{ color: "#30D158",  fontSize: 11, marginBottom: 10 }}>{changePwOk}</div>}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={changePassword}
+                    style={{ flex: 1, background: c.accent, color: c.adk, border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+                  >
+                    💾 儲存
+                  </button>
+                  <button
+                    onClick={() => { setChangePwOpen(false); setChangePwCur(""); setChangePwNew(""); setChangePwConf(""); setChangePwErr(""); }}
+                    style={{ flex: 1, background: c.pill, color: c.sub, border: "none", borderRadius: 10, padding: "10px", fontSize: 13, cursor: "pointer" }}
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </Sect>
+
+        {/* ── Account Management (admin only) ── */}
+        {isAdmin && (
+          <>
+            {/* ── Activity Monitor ── */}
+            <Sect label="活動監控 ACTIVITY MONITOR 🛡" c={c}>
+              <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
+                <div style={{ fontSize: 11, color: c.sub, marginBottom: 12, lineHeight: 1.6 }}>
+                  帳號活動摘要 · Account name, last login & flight count only.<br />
+                  <span style={{ color: c.accent, fontWeight: 700 }}>Private flight contents are never visible here.</span>
+                </div>
+                {accsLoading ? (
+                  <div style={{ color: c.sub, fontSize: 12 }}>載入中...</div>
+                ) : Object.keys(accounts).length === 0 ? (
+                  <div style={{ color: c.sub, fontSize: 12, textAlign: "center", padding: "8px 0" }}>No accounts yet</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    {/* Header row */}
+                    <div style={{ display: "flex", gap: 8, padding: "4px 8px", marginBottom: 4 }}>
+                      <span style={{ flex: 1, fontSize: 9, letterSpacing: 2, color: c.sub, fontWeight: 700 }}>USERNAME</span>
+                      <span style={{ width: 80, fontSize: 9, letterSpacing: 1, color: c.sub, fontWeight: 700, textAlign: "center" }}>LAST LOGIN</span>
+                      <span style={{ width: 36, fontSize: 9, letterSpacing: 1, color: c.sub, fontWeight: 700, textAlign: "center" }}>✈</span>
+                      <span style={{ width: 24 }} />
+                    </div>
+                    {Object.keys(accounts).map(u => {
+                      const stat      = usageData[u] || {};
+                      const lastLogin = stat.lastLogin
+                        ? new Date(stat.lastLogin).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })
+                        : "—";
+                      const flights   = stat.flightCount ?? "—";
+                      const daysAgo   = stat.lastLogin
+                        ? Math.floor((Date.now() - new Date(stat.lastLogin)) / 86400000)
+                        : null;
+                      const inactive  = daysAgo !== null && daysAgo > 30;
+                      return (
+                        <div key={u} style={{ display: "flex", alignItems: "center", gap: 8, background: c.cardAlt, borderRadius: 10, padding: "8px 10px", marginBottom: 4, border: `1px solid ${inactive ? "rgba(255,69,58,0.2)" : "transparent"}` }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ fontWeight: 700, color: c.text, fontSize: 13 }}>{u}</span>
+                            {u === username && <span style={{ fontSize: 9, color: c.accent, marginLeft: 6 }}>YOU</span>}
+                            {inactive && <span style={{ fontSize: 9, color: "#FF453A", marginLeft: 6 }}>INACTIVE {daysAgo}d</span>}
+                          </div>
+                          <span style={{ width: 80, fontSize: 10, color: c.sub, textAlign: "center" }}>{lastLogin}</span>
+                          <span style={{ width: 36, fontSize: 12, fontWeight: 700, color: c.accent, textAlign: "center" }}>{flights}</span>
+                          {delAccConfirm === u ? (
+                            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                              <button onClick={() => deleteAccount(u)} style={{ background: "#FF453A", color: "#fff", border: "none", borderRadius: 6, padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>確認</button>
+                              <button onClick={() => setDelAccConfirm("")} style={{ background: c.pill, color: c.sub, border: "none", borderRadius: 6, padding: "3px 6px", fontSize: 10, cursor: "pointer" }}>取消</button>
+                            </div>
+                          ) : (
+                            u !== username ? (
+                              <button onClick={() => setDelAccConfirm(u)} style={{ background: "none", border: "none", color: "#FF453A", cursor: "pointer", fontSize: 15, padding: "0 2px", flexShrink: 0 }}>×</button>
+                            ) : <span style={{ width: 20 }} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </Sect>
+
+            {/* ── Add Account ── */}
+            <Sect label="新增帳號 ADD ACCOUNT" c={c}>
+              <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
+                <div style={{ fontSize: 11, color: c.sub, marginBottom: 12 }}>
+                  新增組員帳號 · Username, password and email for password reset
+                </div>
+                <ClearableInput
+                  value={newAccUser}
+                  onChange={e => { setNewAccUser(e.target.value); setNewAccErr(""); }}
+                  placeholder="Username"
+                  autoComplete="off"
+                  style={{ ...inp, fontSize: 13, padding: "9px 12px", marginBottom: 8 }}
+                  c={c}
+                />
+                <ClearableInput
+                  type="password"
+                  value={newAccPass}
+                  onChange={e => { setNewAccPass(e.target.value); setNewAccErr(""); }}
+                  placeholder="Password (min 6 chars)"
+                  autoComplete="new-password"
+                  style={{ ...inp, fontSize: 13, padding: "9px 12px", marginBottom: 8 }}
+                  c={c}
+                />
+                <ClearableInput
+                  value={newAccEmail}
+                  onChange={e => { setNewAccEmail(e.target.value); setNewAccErr(""); }}
+                  placeholder="Email (required for password reset)"
+                  autoComplete="off"
+                  type="email"
+                  style={{ ...inp, fontSize: 13, padding: "9px 12px", marginBottom: newAccErr ? 6 : 10 }}
+                  c={c}
+                />
+                {newAccErr && <div style={{ color: "#FF453A", fontSize: 11, marginBottom: 8 }}>{newAccErr}</div>}
+                {newAccOk  && <div style={{ color: "#30D158", fontSize: 11, marginBottom: 8 }}>{newAccOk}</div>}
+                <button
+                  onClick={addAccount}
+                  style={{ width: "100%", background: c.accent, color: c.adk, border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                >
+                  + 新增帳號 Add Account
+                </button>
+              </div>
+            </Sect>
+          </>
+        )}
 
         {/* ── Danger Zone ── */}
         <Sect label="危險區域 DANGER ZONE" c={c}>
@@ -1616,12 +1902,26 @@ export default function App() {
   const gs = makeGlobalStyles(c, dark);
 
   // ── §13.2  Auth state ─────────────────────────────────────────────────────
-  const [authStep,       setAuthStep]       = useState("loading");
-  const [username,       setUsername]       = useState("");
-  const [passcodeInput,  setPasscodeInput]  = useState("");
-  const [passcodeErr,    setPasscodeErr]    = useState("");
-  const [usernameInput,  setUsernameInput]  = useState("");
-  const [usernameErr,    setUsernameErr]    = useState("");
+  // authStep: "loading" | "passcode" | "personal" | "forgot" | "otp" | "resetpw" | "app"
+  const [authStep,        setAuthStep]        = useState("loading");
+  const [username,        setUsername]        = useState("");
+  const [passcodeInput,   setPasscodeInput]   = useState("");
+  const [passcodeErr,     setPasscodeErr]     = useState("");
+  const [usernameInput,   setUsernameInput]   = useState("");
+  const [personalPwInput, setPersonalPwInput] = useState("");
+  const [personalErr,     setPersonalErr]     = useState("");
+  const [personalLoading, setPersonalLoading] = useState(false);
+  // forgot-password flow
+  const [forgotUser,      setForgotUser]      = useState("");
+  const [forgotErr,       setForgotErr]       = useState("");
+  const [forgotLoading,   setForgotLoading]   = useState(false);
+  const [otpInput,        setOtpInput]        = useState("");
+  const [otpErr,          setOtpErr]          = useState("");
+  const [resetPwInput,    setResetPwInput]    = useState("");
+  const [resetPwConfirm,  setResetPwConfirm]  = useState("");
+  const [resetPwErr,      setResetPwErr]      = useState("");
+  const [resetPwLoading,  setResetPwLoading]  = useState(false);
+  const [otpTargetUser,   setOtpTargetUser]   = useState(""); // username going through reset
 
   // ── §13.3  Shared data (synced to Firestore for all users) ────────────────
   const [crew,   setCrew]   = useState([]);
@@ -1692,11 +1992,12 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const saved = localStorage.getItem("cl-username");
-    const auth  = localStorage.getItem("cl-auth");
-    if (auth === "ok" && saved) { setUsername(saved); setAuthStep("app"); }
-    else if (auth === "ok")     { setAuthStep("username"); }
-    else                        { setAuthStep("passcode"); }
+    const layer1 = localStorage.getItem("cl-auth");
+    const layer2 = localStorage.getItem("cl-auth2");
+    const saved  = localStorage.getItem("cl-username");
+    if (layer1 === "ok" && layer2 === "ok" && saved) { setUsername(saved); setAuthStep("app"); }
+    else if (layer1 === "ok")                         { setAuthStep("personal"); }
+    else                                              { setAuthStep("passcode"); }
   }, []);
 
 
@@ -1762,32 +2063,210 @@ export default function App() {
   // §18  AUTH HANDLERS
   // ─────────────────────────────────────────────────────────────────────────
 
+  /**
+   * Records a login event to USAGE_DOC.
+   * Only stores: joinedAt (first time), lastLogin, flightCount.
+   * Passwords and flight contents are NEVER written here.
+   */
+  const recordLogin = async (uname) => {
+    try {
+      const snap  = await getDoc(USAGE_DOC);
+      const usage = snap.exists() ? (snap.data().usage || {}) : {};
+      const now   = new Date().toISOString();
+      const prev  = usage[uname] || {};
+      await setDoc(USAGE_DOC, {
+        usage: {
+          ...usage,
+          [uname]: {
+            joinedAt:    prev.joinedAt    || now,
+            lastLogin:   now,
+            flightCount: prev.flightCount || 0,
+          },
+        },
+      });
+    } catch { /* non-critical — don't block login */ }
+  };
+
+  /** Layer 1 — shared passcode check */
   const submitPasscode = () => {
     if (passcodeInput === APP_PASSCODE) {
       localStorage.setItem("cl-auth", "ok");
       setPasscodeErr("");
-      const saved = localStorage.getItem("cl-username");
-      if (saved) { setUsername(saved); setAuthStep("app"); }
-      else       { setAuthStep("username"); }
+      setPasscodeInput("");
+      setAuthStep("personal");
     } else {
       setPasscodeErr("密碼錯誤 Wrong passcode ✈");
       setPasscodeInput("");
     }
   };
 
-  const submitUsername = () => {
-    const name = usernameInput.trim();
-    if (!name)           { setUsernameErr("請輸入你的名字 Enter your name"); return; }
-    if (name.length > 20) { setUsernameErr("名字太長了 Too long"); return; }
-    localStorage.setItem("cl-username", name);
-    setUsername(name);
-    setAuthStep("app");
+  /**
+   * Layer 2 — personal username + password check against Firestore.
+   * Accounts structure: { [username]: { password: string, email: string } }
+   * First-ever boot uses "adminsetup" to seed the accounts document.
+   */
+  const submitPersonal = async () => {
+    const uname = usernameInput.trim();
+    if (!uname)           { setPersonalErr("請輸入用戶名 Enter username"); return; }
+    if (!personalPwInput) { setPersonalErr("請輸入密碼 Enter password");   return; }
+
+    setPersonalLoading(true);
+    setPersonalErr("");
+    try {
+      const snap     = await getDoc(ACCOUNTS_DOC);
+      const accounts = snap.exists() ? (snap.data().accounts || {}) : {};
+
+      // ── First-ever boot: seed admin account ──────────────────────────────
+      if (Object.keys(accounts).length === 0 && uname === "adminsetup") {
+        const seeded = { adminsetup: { password: personalPwInput, email: "" } };
+        await setDoc(ACCOUNTS_DOC, { accounts: seeded });
+        localStorage.setItem("cl-auth2", "ok");
+        localStorage.setItem("cl-username", uname);
+        setUsername(uname);
+        await recordLogin(uname);
+        setAuthStep("app");
+        return;
+      }
+
+      // ── Normal login ──────────────────────────────────────────────────────
+      if (!accounts[uname]) {
+        setPersonalErr("找不到帳號 Account not found");
+        return;
+      }
+      const storedPw = typeof accounts[uname] === "object"
+        ? accounts[uname].password
+        : accounts[uname]; // backwards compat with old plain-string format
+      if (storedPw !== personalPwInput) {
+        setPersonalErr("密碼錯誤 Wrong password ✈");
+        setPersonalPwInput("");
+        return;
+      }
+
+      localStorage.setItem("cl-auth2", "ok");
+      localStorage.setItem("cl-username", uname);
+      setUsername(uname);
+      await recordLogin(uname);
+      setAuthStep("app");
+    } catch {
+      setPersonalErr("連線失敗 Connection error — try again");
+    } finally {
+      setPersonalLoading(false);
+    }
+  };
+
+  /**
+   * Forgot password — Step 1: look up account, generate OTP, send email via EmailJS.
+   * OTP stored in Firestore under RESETS_DOC with 15-min expiry.
+   */
+  const submitForgot = async () => {
+    const uname = forgotUser.trim();
+    if (!uname) { setForgotErr("請輸入用戶名 Enter username"); return; }
+
+    setForgotLoading(true);
+    setForgotErr("");
+    try {
+      const snap     = await getDoc(ACCOUNTS_DOC);
+      const accounts = snap.exists() ? (snap.data().accounts || {}) : {};
+      if (!accounts[uname]) { setForgotErr("找不到帳號 Account not found"); return; }
+
+      const acct  = typeof accounts[uname] === "object" ? accounts[uname] : { password: accounts[uname], email: "" };
+      const email = acct.email || "";
+      if (!email) { setForgotErr("此帳號未設定電郵 No email on file — contact admin"); return; }
+
+      // Generate 6-digit OTP and store with expiry
+      const code   = String(Math.floor(100000 + Math.random() * 900000));
+      const expiry = Date.now() + OTP_EXPIRY_MS;
+      const resSnap  = await getDoc(RESETS_DOC);
+      const resets   = resSnap.exists() ? (resSnap.data().resets || {}) : {};
+      await setDoc(RESETS_DOC, { resets: { ...resets, [uname]: { code, expiry } } });
+
+      // Send email via EmailJS REST API
+      await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          service_id:  EMAILJS_SERVICE_ID,
+          template_id: EMAILJS_TEMPLATE_ID,
+          user_id:     EMAILJS_PUBLIC_KEY,
+          template_params: { to_email: email, username: uname, otp_code: code },
+        }),
+      });
+
+      setOtpTargetUser(uname);
+      setAuthStep("otp");
+    } catch (err) {
+      setForgotErr("發送失敗 Failed to send — check EmailJS config");
+      console.error(err);
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  /**
+   * Forgot password — Step 2: validate OTP code.
+   */
+  const submitOtp = async () => {
+    if (!otpInput.trim()) { setOtpErr("請輸入驗證碼 Enter the code"); return; }
+    setOtpErr("");
+    try {
+      const snap   = await getDoc(RESETS_DOC);
+      const resets = snap.exists() ? (snap.data().resets || {}) : {};
+      const entry  = resets[otpTargetUser];
+      if (!entry)                    { setOtpErr("驗證碼不存在 Code not found"); return; }
+      if (Date.now() > entry.expiry) { setOtpErr("驗證碼已過期 Code expired — request a new one"); return; }
+      if (otpInput.trim() !== entry.code) { setOtpErr("驗證碼錯誤 Wrong code"); return; }
+      setAuthStep("resetpw");
+    } catch {
+      setOtpErr("連線失敗 Connection error");
+    }
+  };
+
+  /**
+   * Forgot password — Step 3: set new password.
+   */
+  const submitResetPw = async () => {
+    if (!resetPwInput)                        { setResetPwErr("請輸入新密碼");          return; }
+    if (resetPwInput.length < 6)              { setResetPwErr("密碼至少 6 位 Min 6 chars"); return; }
+    if (resetPwInput !== resetPwConfirm)      { setResetPwErr("密碼不一致 Passwords don't match"); return; }
+
+    setResetPwLoading(true);
+    setResetPwErr("");
+    try {
+      // Update password in accounts
+      const snap     = await getDoc(ACCOUNTS_DOC);
+      const accounts = snap.exists() ? (snap.data().accounts || {}) : {};
+      const acct     = typeof accounts[otpTargetUser] === "object"
+        ? accounts[otpTargetUser]
+        : { password: accounts[otpTargetUser], email: "" };
+      const updated  = { ...accounts, [otpTargetUser]: { ...acct, password: resetPwInput } };
+      await setDoc(ACCOUNTS_DOC, { accounts: updated });
+
+      // Clear the OTP
+      const resSnap = await getDoc(RESETS_DOC);
+      const resets  = resSnap.exists() ? (resSnap.data().resets || {}) : {};
+      const { [otpTargetUser]: _, ...remaining } = resets;
+      await setDoc(RESETS_DOC, { resets: remaining });
+
+      // Auto-login
+      localStorage.setItem("cl-auth2", "ok");
+      localStorage.setItem("cl-username", otpTargetUser);
+      setUsername(otpTargetUser);
+      setOtpInput(""); setResetPwInput(""); setResetPwConfirm(""); setOtpTargetUser("");
+      setAuthStep("app");
+    } catch {
+      setResetPwErr("連線失敗 Connection error");
+    } finally {
+      setResetPwLoading(false);
+    }
   };
 
   const logout = () => {
     localStorage.removeItem("cl-auth");
+    localStorage.removeItem("cl-auth2");
     localStorage.removeItem("cl-username");
-    setUsername(""); setPasscodeInput(""); setAuthStep("passcode");
+    setUsername(""); setPasscodeInput(""); setUsernameInput(""); setPersonalPwInput("");
+    setForgotUser(""); setOtpInput(""); setResetPwInput(""); setResetPwConfirm("");
+    setAuthStep("passcode");
     setReady(false); setCrew([]); setFlights([]); setRoutes([]);
   };
 
@@ -1907,11 +2386,20 @@ export default function App() {
     };
 
     if (qlEditFlightId) {
-      // Update existing flight
+      // Update existing flight — count stays the same
       setFlights(fl => fl.map(f => f.id === qlEditFlightId ? entry : f));
     } else {
       // Add new flight and propagate status/tags to the crew member
-      setFlights(fl => [...fl, entry]);
+      setFlights(fl => {
+        const next = [...fl, entry];
+        // Update flight count in usage tracker (count only, no content)
+        getDoc(USAGE_DOC).then(snap => {
+          const usage = snap.exists() ? (snap.data().usage || {}) : {};
+          const prev  = usage[username] || {};
+          setDoc(USAGE_DOC, { usage: { ...usage, [username]: { ...prev, flightCount: next.length } } }).catch(() => {});
+        }).catch(() => {});
+        return next;
+      });
       setCrew(cr => cr.map(m => {
         if (m.id !== form.crewId) return m;
         return {
@@ -2004,15 +2492,21 @@ export default function App() {
           <img src="/logo.png" alt="CrewLog" style={{ width: 80, height: 80, objectFit: "contain", marginBottom: 12, borderRadius: 18 }} />
           <div style={{ fontSize: 9, letterSpacing: 5, color: c.accent, fontWeight: 700, marginBottom: 6 }}>CREW LOG</div>
           <div style={{ fontSize: 26, fontWeight: 800, color: c.text, lineHeight: 1.2 }}>空中生存指南</div>
-          <div style={{ fontSize: 13, color: c.sub, marginTop: 8 }}>Enter passcode to continue</div>
+          <div style={{ fontSize: 13, color: c.sub, marginTop: 8 }}>Enter crew passcode to continue</div>
         </div>
-        {/* Passcode card */}
+        {/* Layer 1 card */}
         <div style={{ background: c.card, borderRadius: 20, padding: 24, border: `1px solid ${c.border}` }}>
-          <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>通關密語 PASSCODE</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+            <span style={{ fontSize: 18 }}>🔐</span>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: c.text }}>Step 1 of 2</div>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: c.sub }}>CREW PASSCODE</div>
+            </div>
+          </div>
           <ClearableInput
             type="password"
             value={passcodeInput}
-            onChange={e => setPasscodeInput(e.target.value)}
+            onChange={e => { setPasscodeInput(e.target.value); setPasscodeErr(""); }}
             onKeyDown={e => e.key === "Enter" && submitPasscode()}
             placeholder="••••••••"
             autoFocus
@@ -2024,41 +2518,210 @@ export default function App() {
             onClick={submitPasscode}
             style={{ width: "100%", background: c.accent, color: c.adk, border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", letterSpacing: 1 }}
           >
-            進入 ENTER ✈
+            繼續 NEXT →
           </button>
         </div>
       </div>
     </div>
   );
 
-  if (authStep === "username") return (
+  if (authStep === "personal") return (
+    <div style={{ background: c.bg, minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, overflowX: "hidden" }}>
+      <style>{gs}</style>
+      <div style={{ width: "100%", maxWidth: 360 }}>
+        <div style={{ textAlign: "center", marginBottom: 40 }}>
+          <img src="/logo.png" alt="CrewLog" style={{ width: 80, height: 80, objectFit: "contain", marginBottom: 12, borderRadius: 18 }} />
+          <div style={{ fontSize: 9, letterSpacing: 5, color: c.accent, fontWeight: 700, marginBottom: 6 }}>CREW LOG</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: c.text, lineHeight: 1.2 }}>空中生存指南</div>
+          <div style={{ fontSize: 13, color: c.sub, marginTop: 8 }}>Sign in to your personal account</div>
+        </div>
+        {/* Layer 2 card */}
+        <div style={{ background: c.card, borderRadius: 20, padding: 24, border: `1px solid ${c.border}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18 }}>
+            <span style={{ fontSize: 18 }}>👤</span>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: c.text }}>Step 2 of 2</div>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: c.sub }}>PERSONAL LOGIN</div>
+            </div>
+          </div>
+
+          <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>用戶名 USERNAME</div>
+          <ClearableInput
+            value={usernameInput}
+            onChange={e => { setUsernameInput(e.target.value); setPersonalErr(""); }}
+            onKeyDown={e => e.key === "Enter" && submitPersonal()}
+            placeholder="Username"
+            autoComplete="username"
+            autoFocus
+            style={{ ...inp, marginBottom: 16, fontSize: 16, textAlign: "center" }}
+            c={c}
+          />
+
+          <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>密碼 PASSWORD</div>
+          <ClearableInput
+            type="password"
+            value={personalPwInput}
+            onChange={e => { setPersonalPwInput(e.target.value); setPersonalErr(""); }}
+            onKeyDown={e => e.key === "Enter" && submitPersonal()}
+            placeholder="••••••••"
+            autoComplete="current-password"
+            style={{ ...inp, marginBottom: personalErr ? 8 : 20, fontSize: 20, letterSpacing: 6, textAlign: "center" }}
+            c={c}
+          />
+          {personalErr && <div style={{ color: "#FF453A", fontSize: 12, marginBottom: 12, textAlign: "center" }}>{personalErr}</div>}
+
+          <button
+            onClick={submitPersonal}
+            disabled={personalLoading}
+            style={{ width: "100%", background: personalLoading ? c.pill : c.accent, color: personalLoading ? c.sub : c.adk, border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 800, cursor: personalLoading ? "default" : "pointer", fontFamily: "inherit", letterSpacing: 1 }}
+          >
+            {personalLoading ? "確認中..." : "進入 ENTER ✈"}
+          </button>
+
+          {/* Forgot password link */}
+          <button
+            onClick={() => { setForgotUser(usernameInput); setForgotErr(""); setAuthStep("forgot"); }}
+            style={{ width: "100%", background: "none", border: "none", color: c.accent, cursor: "pointer", fontSize: 12, marginTop: 14, fontFamily: "inherit", fontWeight: 700 }}
+          >
+            忘記密碼？ Forgot password?
+          </button>
+
+          {/* Back to layer 1 */}
+          <button
+            onClick={() => { localStorage.removeItem("cl-auth"); setAuthStep("passcode"); setPersonalErr(""); }}
+            style={{ width: "100%", background: "none", border: "none", color: c.sub, cursor: "pointer", fontSize: 12, marginTop: 6, fontFamily: "inherit" }}
+          >
+            ← 返回 Back
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Forgot password — Step 1: enter username ────────────────────────────
+  if (authStep === "forgot") return (
     <div style={{ background: c.bg, minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, overflowX: "hidden" }}>
       <style>{gs}</style>
       <div style={{ width: "100%", maxWidth: 360 }}>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{ fontSize: 40, marginBottom: 10 }}>👋</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: c.text }}>你叫什麼名字？</div>
-          <div style={{ fontSize: 13, color: c.sub, marginTop: 8, lineHeight: 1.7 }}>
-            Pick a name — your flight logs will be<br /><strong style={{ color: c.accent }}>private</strong> and only visible to you.
+          <div style={{ fontSize: 40, marginBottom: 8 }}>🔑</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: c.text }}>忘記密碼</div>
+          <div style={{ fontSize: 13, color: c.sub, marginTop: 8, lineHeight: 1.6 }}>
+            Enter your username and we'll send<br />a 6-digit reset code to your email.
           </div>
         </div>
         <div style={{ background: c.card, borderRadius: 20, padding: 24, border: `1px solid ${c.border}` }}>
-          <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>你的名字 YOUR NAME</div>
+          <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>用戶名 USERNAME</div>
           <ClearableInput
-            value={usernameInput}
-            onChange={e => setUsernameInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && submitUsername()}
-            placeholder="e.g. Erika, Hanae..."
+            value={forgotUser}
+            onChange={e => { setForgotUser(e.target.value); setForgotErr(""); }}
+            onKeyDown={e => e.key === "Enter" && submitForgot()}
+            placeholder="Username"
             autoFocus
-            style={{ ...inp, marginBottom: usernameErr ? 8 : 16, fontSize: 18, textAlign: "center" }}
+            style={{ ...inp, marginBottom: forgotErr ? 8 : 16, fontSize: 16, textAlign: "center" }}
             c={c}
           />
-          {usernameErr && <div style={{ color: "#FF453A", fontSize: 12, marginBottom: 12, textAlign: "center" }}>{usernameErr}</div>}
+          {forgotErr && <div style={{ color: "#FF453A", fontSize: 12, marginBottom: 12, textAlign: "center" }}>{forgotErr}</div>}
           <button
-            onClick={submitUsername}
+            onClick={submitForgot}
+            disabled={forgotLoading}
+            style={{ width: "100%", background: forgotLoading ? c.pill : c.accent, color: forgotLoading ? c.sub : c.adk, border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 800, cursor: forgotLoading ? "default" : "pointer", fontFamily: "inherit" }}
+          >
+            {forgotLoading ? "發送中..." : "發送驗證碼 Send Code ✉"}
+          </button>
+          <button
+            onClick={() => { setForgotErr(""); setAuthStep("personal"); }}
+            style={{ width: "100%", background: "none", border: "none", color: c.sub, cursor: "pointer", fontSize: 12, marginTop: 12, fontFamily: "inherit" }}
+          >
+            ← 返回登入 Back to login
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Forgot password — Step 2: enter OTP ────────────────────────────────
+  if (authStep === "otp") return (
+    <div style={{ background: c.bg, minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, overflowX: "hidden" }}>
+      <style>{gs}</style>
+      <div style={{ width: "100%", maxWidth: 360 }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ fontSize: 40, marginBottom: 8 }}>✉️</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: c.text }}>驗證碼已發送</div>
+          <div style={{ fontSize: 13, color: c.sub, marginTop: 8, lineHeight: 1.6 }}>
+            Check your email for a 6-digit code.<br />
+            <span style={{ color: c.accent, fontWeight: 700 }}>Valid for 15 minutes.</span>
+          </div>
+        </div>
+        <div style={{ background: c.card, borderRadius: 20, padding: 24, border: `1px solid ${c.border}` }}>
+          <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>驗證碼 RESET CODE</div>
+          <ClearableInput
+            value={otpInput}
+            onChange={e => { setOtpInput(e.target.value.replace(/\D/g, "").slice(0, 6)); setOtpErr(""); }}
+            onKeyDown={e => e.key === "Enter" && submitOtp()}
+            placeholder="000000"
+            autoFocus
+            inputMode="numeric"
+            maxLength={6}
+            style={{ ...inp, marginBottom: otpErr ? 8 : 16, fontSize: 28, letterSpacing: 8, textAlign: "center" }}
+            c={c}
+          />
+          {otpErr && <div style={{ color: "#FF453A", fontSize: 12, marginBottom: 12, textAlign: "center" }}>{otpErr}</div>}
+          <button
+            onClick={submitOtp}
             style={{ width: "100%", background: c.accent, color: c.adk, border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}
           >
-            開始 START 🚀
+            確認 Verify →
+          </button>
+          <button
+            onClick={() => { setOtpInput(""); setOtpErr(""); setAuthStep("forgot"); }}
+            style={{ width: "100%", background: "none", border: "none", color: c.sub, cursor: "pointer", fontSize: 12, marginTop: 12, fontFamily: "inherit" }}
+          >
+            ← 重新發送 Resend code
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Forgot password — Step 3: set new password ─────────────────────────
+  if (authStep === "resetpw") return (
+    <div style={{ background: c.bg, minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, overflowX: "hidden" }}>
+      <style>{gs}</style>
+      <div style={{ width: "100%", maxWidth: 360 }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ fontSize: 40, marginBottom: 8 }}>🔒</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: c.text }}>設定新密碼</div>
+          <div style={{ fontSize: 13, color: c.sub, marginTop: 8 }}>Choose a strong new password for<br /><strong style={{ color: c.accent }}>{otpTargetUser}</strong></div>
+        </div>
+        <div style={{ background: c.card, borderRadius: 20, padding: 24, border: `1px solid ${c.border}` }}>
+          <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>新密碼 NEW PASSWORD</div>
+          <ClearableInput
+            type="password"
+            value={resetPwInput}
+            onChange={e => { setResetPwInput(e.target.value); setResetPwErr(""); }}
+            placeholder="Min 6 characters"
+            autoFocus
+            style={{ ...inp, marginBottom: 14, fontSize: 18, letterSpacing: 4, textAlign: "center" }}
+            c={c}
+          />
+          <div style={{ fontSize: 10, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8 }}>確認密碼 CONFIRM PASSWORD</div>
+          <ClearableInput
+            type="password"
+            value={resetPwConfirm}
+            onChange={e => { setResetPwConfirm(e.target.value); setResetPwErr(""); }}
+            onKeyDown={e => e.key === "Enter" && submitResetPw()}
+            placeholder="Repeat password"
+            style={{ ...inp, marginBottom: resetPwErr ? 8 : 18, fontSize: 18, letterSpacing: 4, textAlign: "center" }}
+            c={c}
+          />
+          {resetPwErr && <div style={{ color: "#FF453A", fontSize: 12, marginBottom: 12, textAlign: "center" }}>{resetPwErr}</div>}
+          <button
+            onClick={submitResetPw}
+            disabled={resetPwLoading}
+            style={{ width: "100%", background: resetPwLoading ? c.pill : c.accent, color: resetPwLoading ? c.sub : c.adk, border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 800, cursor: resetPwLoading ? "default" : "pointer", fontFamily: "inherit" }}
+          >
+            {resetPwLoading ? "更新中..." : "儲存新密碼 Save & Login ✈"}
           </button>
         </div>
       </div>
