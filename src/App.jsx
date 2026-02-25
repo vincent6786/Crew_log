@@ -2410,7 +2410,7 @@ export default function App() {
       setQlInitialForm(f);
       setQlEditFlightId(null);
     }
-    setQlReturnView(returnView || (profileId ? "profile" : "dashboard"));
+    setQlReturnView(returnView || "dashboard");
     setView("quicklog");
   };
 
