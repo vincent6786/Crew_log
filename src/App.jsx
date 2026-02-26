@@ -37,7 +37,7 @@ const OTP_EXPIRY_MS = 15 * 60 * 1000;
 
 /** Built-in tags (shown for all users, cannot be deleted). */
 const PRESET_TAGS = [
-  "#好咖", "#細心", "#SOP",
+  "#好咖", "#細心", "#SOP","#難搞"
   "#好笑", "#專業", "#八卦", "#合拍",
 ];
 
