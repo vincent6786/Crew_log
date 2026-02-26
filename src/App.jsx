@@ -37,8 +37,8 @@ const OTP_EXPIRY_MS = 15 * 60 * 1000;
 
 /** Built-in tags (shown for all users, cannot be deleted). */
 const PRESET_TAGS = [
-  "#好咖", "#難搞", "#細心", "#新人",
-  "#好笑", "#專業", "#八卦", "#準時",
+  "#好咖", "#細心", "#SOP",
+  "#好笑", "#專業", "#八卦", "#合拍",
 ];
 
 /** Selectable aircraft types. */
