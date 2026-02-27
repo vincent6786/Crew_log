@@ -74,6 +74,59 @@ const mkId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,
 /** Returns today's date as an ISO string (YYYY-MM-DD). */
 const today = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * Calculates the most popular status color from all votes.
+ * Returns null if no votes exist.
+ * In case of ties, prefers: green > yellow > red (optimistic bias).
+ */
+const calculateConsensusStatus = (statusVotes) => {
+  if (!statusVotes || Object.keys(statusVotes).length === 0) return null;
+  
+  const counts = { red: 0, yellow: 0, green: 0 };
+  Object.values(statusVotes).forEach(vote => {
+    if (vote.color && counts.hasOwnProperty(vote.color)) {
+      counts[vote.color]++;
+    }
+  });
+  
+  // Return the color with the most votes
+  // If tied, prefer: green > yellow > red (safety first!)
+  let maxColor = null;
+  let maxCount = 0;
+  const priority = ['green', 'yellow', 'red'];
+  
+  priority.forEach(color => {
+    if (counts[color] > maxCount) {
+      maxCount = counts[color];
+      maxColor = color;
+    }
+  });
+  
+  return maxColor;
+};
+
+/**
+ * Migrates legacy crew data from old status format to new voting format.
+ * If a crew member has status but no statusVotes, converts status to a "legacy" vote.
+ */
+const migrateLegacyCrewData = (crewArray) => {
+  return crewArray.map(m => {
+    // If member has a status but no statusVotes, migrate it
+    if (m.status && (!m.statusVotes || Object.keys(m.statusVotes).length === 0)) {
+      return {
+        ...m,
+        statusVotes: {
+          legacy: {
+            color: m.status,
+            timestamp: new Date().toISOString()
+          }
+        }
+      };
+    }
+    return m;
+  });
+};
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §3  THEME PALETTES
@@ -149,7 +202,8 @@ const flightDoc = (username) => doc(db, "crewlog", `flights-${username}`);
     nickname:   string   — English callsign / display name
     name:       string   — Chinese/Japanese full name
     seniority:  string   — training batch e.g. "24G"
-    status:     "red" | "yellow" | "green" | null
+    status:     "red" | "yellow" | "green" | null — consensus from all votes
+    statusVotes: { [username]: { color: "red"|"yellow"|"green", timestamp: string } }
     tags:       string[] — subset of allTags
     notes:      string   — long-form shared notes
   }
@@ -164,7 +218,7 @@ const flightDoc = (username) => doc(db, "crewlog", `flights-${username}`);
     aircraft:   string   — one of AIRCRAFT
     position:   string   — one of POSITIONS or custom
     memo:       string   — private free-text note
-    // NOTE: status & tags are NOT stored per-flight; they update the crew object
+    myStatus:   "red" | "yellow" | "green" | null — personal vote for this crew member
   }
 
   Saved route object:
@@ -769,10 +823,10 @@ function SettingsView({
 
   // ── Load accounts + usage + appSettings from Firestore on mount ────────────────
   useEffect(() => {
-    Promise.all([getDoc(ACCOUNTS_DOC), getDoc(USAGE_DOC), getDoc(APP_SETTINGS_DOC)])
-      .then(([accSnap, usageSnap, settSnap]) => {
-        setAccounts(accSnap.exists()   ? (accSnap.data().accounts   || {}) : {});
-        setUsageData(usageSnap.exists() ? (usageSnap.data().usage   || {}) : {});
+    // Load accounts and settings once
+    Promise.all([getDoc(ACCOUNTS_DOC), getDoc(APP_SETTINGS_DOC)])
+      .then(([accSnap, settSnap]) => {
+        setAccounts(accSnap.exists() ? (accSnap.data().accounts || {}) : {});
         if (settSnap.exists()) {
           const s = settSnap.data();
           setRegOpen(s.registrationOpen === true);
@@ -782,6 +836,22 @@ function SettingsView({
       })
       .catch(() => {})
       .finally(() => setAccsLoading(false));
+    
+    // Add real-time listener for usage data (admin activity monitor)
+    const unsubUsage = onSnapshot(USAGE_DOC, (snap) => {
+      if (snap.exists()) {
+        setUsageData(snap.data().usage || {});
+      } else {
+        setUsageData({});
+      }
+    }, () => {
+      // Error handler - fail silently
+      setUsageData({});
+    });
+    
+    return () => {
+      unsubUsage();
+    };
   }, []);
 
   /** Add a new account to Firestore */
@@ -1701,7 +1771,7 @@ function QuickLogView({ crew, routes, setRoutes, initialForm, editFlightId, onSa
         {/* ── Status & Tags  (new flights only) ── */}
         {!editFlightId && (
           <>
-            <Sect label="紅黃綠燈 STATUS" c={c}>
+            <Sect label="我的評價 MY RATING" c={c}>
               <div style={{ display: "flex", gap: 8 }}>
                 {Object.entries(STATUS_MAP).map(([k, v]) => (
                   <button
@@ -2026,6 +2096,12 @@ function MyLogView({ flights, crew, username, onBack, onGoProfile, onEdit, c }) 
                               {m.name}
                             </span>
                           )}
+                          {/* Show personal rating if exists */}
+                          {f.myStatus && STATUS_MAP[f.myStatus] && (
+                            <span style={{ fontSize: 11, flexShrink: 0 }} title={`我的評價: ${STATUS_MAP[f.myStatus].label}`}>
+                              {STATUS_MAP[f.myStatus].emoji}
+                            </span>
+                          )}
                           {f.flightNum && (
                             <span style={{ marginLeft: "auto", fontSize: 10, color: c.accent, fontWeight: 700, background: c.pill, borderRadius: 6, padding: "1px 6px", flexShrink: 0 }}>
                               {f.flightNum}
@@ -2213,8 +2289,14 @@ export default function App() {
       SHARED_DOC,
       (snap) => {
         isRemoteShared.current = true;
-        if (snap.exists()) { const d = snap.data(); setCrew(d.crew || INITIAL_CREW); setRoutes(d.routes || []); }
-        else               { setCrew(INITIAL_CREW); setRoutes([]); }
+        if (snap.exists()) { 
+          const d = snap.data(); 
+          // Apply migration to convert legacy status to statusVotes
+          const migratedCrew = migrateLegacyCrewData(d.crew || INITIAL_CREW);
+          setCrew(migratedCrew); 
+          setRoutes(d.routes || []); 
+        }
+        else { setCrew(INITIAL_CREW); setRoutes([]); }
         setSyncStatus("synced");
         setReady(true);
       },
@@ -2599,7 +2681,13 @@ export default function App() {
       const f = { ...EMPTY_FORM, date: today(), aircraft: defaultAircraft, position: defaultPosition };
       if (crewId) {
         const m = crew.find(x => x.id === crewId);
-        if (m) { f.crewId = m.id; f.crewTxt = `${m.nickname} — ${m.name}`; f.status = m.status; f.tags = [...m.tags]; }
+        if (m) { 
+          f.crewId = m.id; 
+          f.crewTxt = `${m.nickname} — ${m.name}`; 
+          // Pre-fill with user's personal vote (not consensus)
+          f.status = m.statusVotes?.[username]?.color || null; 
+          f.tags = [...m.tags]; 
+        }
       }
       setQlInitialForm(f);
       setQlEditFlightId(null);
@@ -2610,7 +2698,7 @@ export default function App() {
 
   /**
    * Called by QuickLogView on submit.
-   * For new logs: also patches the crew member's status and tags.
+   * For new logs: also patches the crew member's status votes and tags.
    * For edits: only updates flight metadata fields.
    */
   const handleSaveLog = (form) => {
@@ -2625,6 +2713,7 @@ export default function App() {
       aircraft:  form.aircraft,
       position:  form.position,
       memo:      form.memo,
+      myStatus:  form.status,  // Store personal vote
     };
 
     if (qlEditFlightId) {
@@ -2642,12 +2731,34 @@ export default function App() {
         }).catch(() => {});
         return next;
       });
+      
+      // Update crew with vote-based status
       setCrew(cr => cr.map(m => {
         if (m.id !== form.crewId) return m;
+        
+        // Update statusVotes with this user's vote
+        const updatedVotes = {
+          ...(m.statusVotes || {}),
+        };
+        
+        if (form.status) {
+          updatedVotes[username] = {
+            color: form.status,
+            timestamp: new Date().toISOString()
+          };
+        } else {
+          // Remove vote if user cleared their status
+          delete updatedVotes[username];
+        }
+        
+        // Calculate new consensus status
+        const newStatus = calculateConsensusStatus(updatedVotes);
+        
         return {
           ...m,
-          status: form.status ?? m.status,
-          tags:   [...new Set([...m.tags, ...form.tags])],
+          status: newStatus,
+          statusVotes: updatedVotes,
+          tags: [...new Set([...m.tags, ...form.tags])],
         };
       }));
     }
@@ -3334,23 +3445,96 @@ export default function App() {
             </div>
           </div>
 
-          {/* Status light toggles */}
+          {/* Status light toggles with voting */}
           <div style={{ display: "flex", gap: 6 }}>
-            {Object.entries(STATUS_MAP).map(([k, v]) => (
-              <button
-                key={k}
-                onClick={() => patchCrew(m.id, { status: m.status === k ? null : k })}
-                style={{
-                  flex: 1, background: m.status === k ? v.bg : c.pill,
-                  border: `1px solid ${m.status === k ? v.color : c.border}`,
-                  color: m.status === k ? v.color : c.sub,
-                  borderRadius: 10, padding: "7px 4px", fontSize: 16, cursor: "pointer",
-                }}
-              >
-                {v.emoji}
-              </button>
-            ))}
+            {Object.entries(STATUS_MAP).map(([k, v]) => {
+              const isConsensus = m.status === k;
+              const myVote = m.statusVotes?.[username]?.color === k;
+              const voteCount = m.statusVotes 
+                ? Object.values(m.statusVotes).filter(vote => vote.color === k).length 
+                : 0;
+              
+              return (
+                <button
+                  key={k}
+                  onClick={() => {
+                    setCrew(cr => cr.map(mm => {
+                      if (mm.id !== m.id) return mm;
+                      
+                      // Toggle user's vote
+                      const updatedVotes = { ...(mm.statusVotes || {}) };
+                      if (myVote) {
+                        // Remove vote if clicking same color
+                        delete updatedVotes[username];
+                      } else {
+                        // Add/update vote
+                        updatedVotes[username] = {
+                          color: k,
+                          timestamp: new Date().toISOString()
+                        };
+                      }
+                      
+                      const newStatus = calculateConsensusStatus(updatedVotes);
+                      
+                      return { 
+                        ...mm, 
+                        status: newStatus,
+                        statusVotes: updatedVotes
+                      };
+                    }));
+                  }}
+                  style={{
+                    flex: 1, 
+                    background: isConsensus ? v.bg : c.pill,
+                    border: myVote 
+                      ? `3px solid ${v.color}`  // Bold border for MY vote
+                      : `1px solid ${isConsensus ? v.color : c.border}`,
+                    color: isConsensus ? v.color : c.sub,
+                    borderRadius: 10, 
+                    padding: myVote ? "5px 4px" : "7px 4px",  // Adjust padding for thicker border
+                    fontSize: 16, 
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 2,
+                  }}
+                >
+                  <span>{v.emoji}</span>
+                  {voteCount > 0 && (
+                    <span style={{ fontSize: 10, fontWeight: 700, color: isConsensus ? v.color : c.sub }}>
+                      {voteCount}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
+          
+          {/* Vote statistics - show if there are any votes */}
+          {m.statusVotes && Object.keys(m.statusVotes).length > 0 && (
+            <div style={{ marginTop: 12, padding: 12, background: c.cardAlt, borderRadius: 12 }}>
+              <div style={{ fontSize: 9, color: c.sub, marginBottom: 8, fontWeight: 700, letterSpacing: 2 }}>
+                票數統計 VOTE BREAKDOWN
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "space-around" }}>
+                {['green', 'yellow', 'red'].map(color => {
+                  const count = Object.values(m.statusVotes).filter(v => v.color === color).length;
+                  const si = STATUS_MAP[color];
+                  return (
+                    <div key={color} style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 22 }}>{si.emoji}</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: si.color }}>{count}</div>
+                      <div style={{ fontSize: 9, color: c.sub, marginTop: 2 }}>{color.toUpperCase()}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 9, color: c.sub, marginTop: 8, textAlign: "center" }}>
+                共 {Object.keys(m.statusVotes).length} 票 · Total {Object.keys(m.statusVotes).length} vote{Object.keys(m.statusVotes).length !== 1 ? 's' : ''}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Profile body ── */}
@@ -3487,6 +3671,11 @@ export default function App() {
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: f.memo ? 5 : 0 }}>
                         {f.aircraft && <span style={{ background: c.pill, color: c.accent, borderRadius: 8, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>{f.aircraft}</span>}
                         {f.position && <span style={{ background: c.pill, color: c.sub,    borderRadius: 8, padding: "2px 8px", fontSize: 11 }}>{f.position}</span>}
+                        {f.myStatus && STATUS_MAP[f.myStatus] && (
+                          <span style={{ background: STATUS_MAP[f.myStatus].bg, color: STATUS_MAP[f.myStatus].color, borderRadius: 8, padding: "2px 8px", fontSize: 11, fontWeight: 700, border: `1px solid ${STATUS_MAP[f.myStatus].color}44` }}>
+                            {STATUS_MAP[f.myStatus].emoji} 我的評價
+                          </span>
+                        )}
                       </div>
 
                       {/* Memo */}
