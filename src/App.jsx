@@ -1383,14 +1383,31 @@ function SettingsView({
                     {/* Header row */}
                     <div style={{ display: "flex", gap: 8, padding: "4px 8px", marginBottom: 4 }}>
                       <span style={{ flex: 1, fontSize: 9, letterSpacing: 2, color: c.sub, fontWeight: 700 }}>USERNAME</span>
-                      <span style={{ width: 80, fontSize: 9, letterSpacing: 1, color: c.sub, fontWeight: 700, textAlign: "center" }}>LAST LOGIN</span>
+                      <span style={{ width: 100, fontSize: 9, letterSpacing: 1, color: c.sub, fontWeight: 700, textAlign: "center" }}>LAST LOGIN</span>
                       <span style={{ width: 36, fontSize: 9, letterSpacing: 1, color: c.sub, fontWeight: 700, textAlign: "center" }}>✈</span>
                       <span style={{ width: 24 }} />
                     </div>
                     {Object.keys(accounts).map(u => {
                       const stat      = usageData[u] || {};
                       const lastLogin = stat.lastLogin
-                        ? new Date(stat.lastLogin).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })
+                        ? (() => {
+                            const d = new Date(stat.lastLogin);
+                            const now = new Date();
+                            const diffMs = now - d;
+                            const diffMins = Math.floor(diffMs / 60000);
+                            const diffHours = Math.floor(diffMs / 3600000);
+                            const diffDays = Math.floor(diffMs / 86400000);
+                            
+                            // Less than 1 hour ago - show "X mins ago"
+                            if (diffMins < 60) return diffMins === 0 ? "just now" : `${diffMins}m ago`;
+                            // Less than 24 hours - show "X hours ago"
+                            if (diffHours < 24) return `${diffHours}h ago`;
+                            // Less than 7 days - show "X days ago"
+                            if (diffDays < 7) return `${diffDays}d ago`;
+                            // Otherwise show date + time
+                            return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) + 
+                                   " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+                          })()
                         : "—";
                       const flights   = stat.flightCount ?? "—";
                       const daysAgo   = stat.lastLogin
@@ -1404,7 +1421,7 @@ function SettingsView({
                             {u === username && <span style={{ fontSize: 9, color: c.accent, marginLeft: 6 }}>YOU</span>}
                             {inactive && <span style={{ fontSize: 9, color: "#FF453A", marginLeft: 6 }}>INACTIVE {daysAgo}d</span>}
                           </div>
-                          <span style={{ width: 80, fontSize: 10, color: c.sub, textAlign: "center" }}>{lastLogin}</span>
+                          <span style={{ width: 100, fontSize: 10, color: c.sub, textAlign: "center" }}>{lastLogin}</span>
                           <span style={{ width: 36, fontSize: 12, fontWeight: 700, color: c.accent, textAlign: "center" }}>{flights}</span>
                           {delAccConfirm === u ? (
                             <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
@@ -2230,6 +2247,7 @@ export default function App() {
   const [tempNotes,      setTempNotes]      = useState("");
   const [confirmDel,     setConfirmDel]     = useState(null);  // flight id pending delete
   const [confirmDelCrew, setConfirmDelCrew] = useState(false);
+  const [showVoteStats,  setShowVoteStats]  = useState(false);  // toggle vote breakdown panel
 
   // ── §13.10  User preferences (persisted to localStorage) ──────────────────
   const [customTags, setCustomTags] = useState(() => {
@@ -2651,6 +2669,7 @@ export default function App() {
     setEditNotes(false);
     setConfirmDel(null);
     setConfirmDelCrew(false);
+    setShowVoteStats(false);
     setView("profile");
   };
 
@@ -3511,28 +3530,84 @@ export default function App() {
             })}
           </div>
           
-          {/* Vote statistics - show if there are any votes */}
+          {/* Vote statistics - collapsible button */}
           {m.statusVotes && Object.keys(m.statusVotes).length > 0 && (
-            <div style={{ marginTop: 12, padding: 12, background: c.cardAlt, borderRadius: 12 }}>
-              <div style={{ fontSize: 9, color: c.sub, marginBottom: 8, fontWeight: 700, letterSpacing: 2 }}>
-                票數統計 VOTE BREAKDOWN
-              </div>
-              <div style={{ display: "flex", gap: 8, justifyContent: "space-around" }}>
-                {['green', 'yellow', 'red'].map(color => {
-                  const count = Object.values(m.statusVotes).filter(v => v.color === color).length;
-                  const si = STATUS_MAP[color];
-                  return (
-                    <div key={color} style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 22 }}>{si.emoji}</div>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: si.color }}>{count}</div>
-                      <div style={{ fontSize: 9, color: c.sub, marginTop: 2 }}>{color.toUpperCase()}</div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ fontSize: 9, color: c.sub, marginTop: 8, textAlign: "center" }}>
-                共 {Object.keys(m.statusVotes).length} 票 · Total {Object.keys(m.statusVotes).length} vote{Object.keys(m.statusVotes).length !== 1 ? 's' : ''}
-              </div>
+            <div style={{ marginTop: 12 }}>
+              <button
+                onClick={() => setShowVoteStats(!showVoteStats)}
+                style={{
+                  width: "100%",
+                  background: showVoteStats ? c.accent : c.pill,
+                  color: showVoteStats ? c.adk : c.sub,
+                  border: `1px solid ${showVoteStats ? c.accent : c.border}`,
+                  borderRadius: 12,
+                  padding: "10px 14px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  fontFamily: "inherit",
+                }}
+              >
+                <span>{showVoteStats ? "▼" : "▶"}</span>
+                <span>票數統計 VOTE BREAKDOWN</span>
+                <span style={{ marginLeft: "auto", opacity: 0.7 }}>
+                  ({Object.keys(m.statusVotes).length} vote{Object.keys(m.statusVotes).length !== 1 ? 's' : ''})
+                </span>
+              </button>
+              
+              {showVoteStats && (
+                <div style={{ marginTop: 8, padding: 12, background: c.cardAlt, borderRadius: 12, border: `1px solid ${c.border}` }}>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "space-around" }}>
+                    {['green', 'yellow', 'red'].map(color => {
+                      const count = Object.values(m.statusVotes).filter(v => v.color === color).length;
+                      const si = STATUS_MAP[color];
+                      return (
+                        <div key={color} style={{ textAlign: "center" }}>
+                          <div style={{ fontSize: 22 }}>{si.emoji}</div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: si.color }}>{count}</div>
+                          <div style={{ fontSize: 9, color: c.sub, marginTop: 2 }}>{color.toUpperCase()}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 9, color: c.sub, marginTop: 10, textAlign: "center", paddingTop: 10, borderTop: `1px solid ${c.border}` }}>
+                    {(() => {
+                      const votes = Object.entries(m.statusVotes);
+                      const recent = votes.sort((a, b) => new Date(b[1].timestamp) - new Date(a[1].timestamp)).slice(0, 3);
+                      return (
+                        <div>
+                          <div style={{ fontWeight: 700, marginBottom: 4, letterSpacing: 1 }}>RECENT VOTES</div>
+                          {recent.map(([user, vote]) => {
+                            const si = STATUS_MAP[vote.color];
+                            const timeAgo = (() => {
+                              const diffMs = Date.now() - new Date(vote.timestamp);
+                              const diffMins = Math.floor(diffMs / 60000);
+                              const diffHours = Math.floor(diffMs / 3600000);
+                              const diffDays = Math.floor(diffMs / 86400000);
+                              if (diffMins < 60) return `${diffMins}m ago`;
+                              if (diffHours < 24) return `${diffHours}h ago`;
+                              return `${diffDays}d ago`;
+                            })();
+                            return (
+                              <div key={user} style={{ fontSize: 10, color: c.sub, marginBottom: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                                <span style={{ fontWeight: 700, color: user === username ? c.accent : c.text }}>
+                                  {user === username ? "YOU" : user}
+                                </span>
+                                <span>{si.emoji}</span>
+                                <span style={{ opacity: 0.6 }}>{timeAgo}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
