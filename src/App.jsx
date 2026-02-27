@@ -187,6 +187,12 @@ const USAGE_DOC = doc(db, "crewlog", "usage");
  */
 const APP_SETTINGS_DOC = doc(db, "crewlog", "appSettings");
 
+/**
+ * Feedback collection — user bug reports and improvement suggestions.
+ * Shape: { feedback: [ { id, username, timestamp, category, message, status } ] }
+ */
+const FEEDBACK_DOC = doc(db, "crewlog", "feedback");
+
 /** Per-user private Firestore document — holds flights[] visible only to owner. */
 const flightDoc = (username) => doc(db, "crewlog", `flights-${username}`);
 
@@ -801,6 +807,17 @@ function SettingsView({
   const [showAcStats,      setShowAcStats]      = useState(true);    // aircraft stats visible
   const [showRouteStats,   setShowRouteStats]   = useState(true);    // top routes visible
   const [statsToggleLoading, setStatsToggleLoading] = useState(false);
+  // Feedback form
+  const [feedbackCategory, setFeedbackCategory] = useState("bug");   // "bug" or "suggestion"
+  const [feedbackMessage,  setFeedbackMessage]  = useState("");
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackSuccess,  setFeedbackSuccess]  = useState("");
+  const [feedbackError,    setFeedbackError]    = useState("");
+  // Admin feedback viewer
+  const [feedbackData,     setFeedbackData]     = useState([]);
+  const [feedbackLoading,  setFeedbackLoading]  = useState(false);
+  const [expandedFeedback, setExpandedFeedback] = useState({});  // { feedbackId: true/false }
+  const [showAllFeedback,  setShowAllFeedback]  = useState(false); // expand/collapse all
 
   const isAdmin = username === "adminsetup";
 
@@ -853,6 +870,31 @@ function SettingsView({
       unsubUsage();
     };
   }, []);
+  
+  // ── Load feedback for admin ────────────────────────────────────────────
+  useEffect(() => {
+    if (!isAdmin) return;
+    
+    setFeedbackLoading(true);
+    const unsubFeedback = onSnapshot(FEEDBACK_DOC, (snap) => {
+      if (snap.exists()) {
+        const feedback = snap.data().feedback || [];
+        // Sort by timestamp, newest first
+        const sorted = feedback.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        setFeedbackData(sorted);
+      } else {
+        setFeedbackData([]);
+      }
+      setFeedbackLoading(false);
+    }, () => {
+      setFeedbackData([]);
+      setFeedbackLoading(false);
+    });
+    
+    return () => {
+      unsubFeedback();
+    };
+  }, [isAdmin]);
 
   /** Add a new account to Firestore */
   const addAccount = async () => {
@@ -967,6 +1009,80 @@ function SettingsView({
     window.location.reload();
   };
 
+  /** Adds a new custom tag (with # prefix normalisation and duplicate check). */
+  
+  /** Submit feedback (bug report or improvement suggestion) */
+  const submitFeedback = async () => {
+    if (!feedbackMessage.trim()) {
+      setFeedbackError("請輸入內容 Please enter your feedback");
+      return;
+    }
+    
+    setFeedbackSubmitting(true);
+    setFeedbackError("");
+    setFeedbackSuccess("");
+    
+    try {
+      // Get existing feedback
+      const snap = await getDoc(FEEDBACK_DOC);
+      const existingFeedback = snap.exists() ? (snap.data().feedback || []) : [];
+      
+      // Create new feedback entry
+      const newFeedback = {
+        id: mkId(),
+        username: username,
+        timestamp: new Date().toISOString(),
+        category: feedbackCategory,
+        message: feedbackMessage.trim(),
+        status: "new"  // new, reviewed, resolved
+      };
+      
+      // Save to Firestore
+      await setDoc(FEEDBACK_DOC, {
+        feedback: [...existingFeedback, newFeedback]
+      });
+      
+      // Show success message and reset form
+      setFeedbackSuccess(feedbackCategory === "bug" 
+        ? "✅ Bug report submitted! Thank you for helping us improve." 
+        : "✅ Suggestion submitted! We appreciate your feedback."
+      );
+      setFeedbackMessage("");
+      setFeedbackCategory("bug");
+      
+      // Clear success message after 5 seconds
+      setTimeout(() => setFeedbackSuccess(""), 5000);
+    } catch (error) {
+      setFeedbackError("❌ 發送失敗 Failed to submit. Please try again.");
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
+  
+  /** Update feedback status (admin only) */
+  const updateFeedbackStatus = async (feedbackId, newStatus) => {
+    try {
+      const snap = await getDoc(FEEDBACK_DOC);
+      const allFeedback = snap.exists() ? (snap.data().feedback || []) : [];
+      const updated = allFeedback.map(f => f.id === feedbackId ? { ...f, status: newStatus } : f);
+      await setDoc(FEEDBACK_DOC, { feedback: updated });
+    } catch (error) {
+      console.error("Failed to update feedback status:", error);
+    }
+  };
+  
+  /** Delete feedback item (admin only) */
+  const deleteFeedback = async (feedbackId) => {
+    try {
+      const snap = await getDoc(FEEDBACK_DOC);
+      const allFeedback = snap.exists() ? (snap.data().feedback || []) : [];
+      const filtered = allFeedback.filter(f => f.id !== feedbackId);
+      await setDoc(FEEDBACK_DOC, { feedback: filtered });
+    } catch (error) {
+      console.error("Failed to delete feedback:", error);
+    }
+  };
+  
   /** Adds a new custom tag (with # prefix normalisation and duplicate check). */
   /** Sends a JSON backup to the user's registered email via EmailJS */
   const emailBackup = async () => {
@@ -1483,6 +1599,185 @@ function SettingsView({
                 </button>
               </div>
             </Sect>
+            
+            {/* ── User Feedback (Admin) ── */}
+            <Sect label="用戶回饋 USER FEEDBACK 💬" c={c}>
+              <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14 }}>
+                {/* Header with counts and toggle */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: c.sub, lineHeight: 1.6 }}>
+                    Bug reports & suggestions from users
+                  </div>
+                  {feedbackData.length > 0 && (
+                    <button
+                      onClick={() => {
+                        const newState = !showAllFeedback;
+                        setShowAllFeedback(newState);
+                        // When showing all, expand all items; when hiding, collapse all
+                        if (newState) {
+                          const allExpanded = {};
+                          feedbackData.forEach(f => { allExpanded[f.id] = true; });
+                          setExpandedFeedback(allExpanded);
+                        } else {
+                          setExpandedFeedback({});
+                        }
+                      }}
+                      style={{
+                        background: showAllFeedback ? c.pill : c.card,
+                        border: `1px solid ${c.border}`,
+                        borderRadius: 8,
+                        padding: "6px 10px",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        color: c.text,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      <span>{showAllFeedback ? "▼" : "▶"}</span>
+                      {(() => {
+                        const newCount = feedbackData.filter(f => f.status === "new").length;
+                        const total = feedbackData.length;
+                        return newCount > 0 ? (
+                          <>
+                            <span style={{ background: c.accent, color: c.adk, borderRadius: 6, padding: "2px 6px", fontSize: 10 }}>
+                              {newCount} NEW
+                            </span>
+                            <span style={{ color: c.sub }}>·</span>
+                            <span>{total} total</span>
+                          </>
+                        ) : (
+                          <span>{total} total</span>
+                        );
+                      })()}
+                    </button>
+                  )}
+                </div>
+                
+                {feedbackLoading ? (
+                  <div style={{ color: c.sub, fontSize: 12, textAlign: "center", padding: "20px 0" }}>載入中...</div>
+                ) : feedbackData.length === 0 ? (
+                  <div style={{ color: c.sub, fontSize: 12, textAlign: "center", padding: "20px 0" }}>No feedback yet</div>
+                ) : !showAllFeedback ? (
+                  <div style={{ textAlign: "center", padding: "10px 0", color: c.sub, fontSize: 12 }}>
+                    Click above to view feedback
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {feedbackData.map(fb => {
+                      const isExpanded = expandedFeedback[fb.id] || false;
+                      const preview = fb.message.length > 80 ? fb.message.slice(0, 80) + "..." : fb.message;
+                      const timeAgo = (() => {
+                        const diffMs = Date.now() - new Date(fb.timestamp);
+                        const diffMins = Math.floor(diffMs / 60000);
+                        const diffHours = Math.floor(diffMs / 3600000);
+                        const diffDays = Math.floor(diffMs / 86400000);
+                        if (diffMins < 60) return `${diffMins}m ago`;
+                        if (diffHours < 24) return `${diffHours}h ago`;
+                        return `${diffDays}d ago`;
+                      })();
+                      
+                      return (
+                        <div 
+                          key={fb.id} 
+                          style={{ 
+                            background: c.cardAlt, 
+                            border: `1px solid ${fb.status === "new" ? c.accent : c.border}`, 
+                            borderRadius: 10, 
+                            padding: "10px 12px" 
+                          }}
+                        >
+                          {/* Header - always visible */}
+                          <div 
+                            onClick={() => setExpandedFeedback(prev => ({ ...prev, [fb.id]: !isExpanded }))}
+                            style={{ 
+                              display: "flex", 
+                              justifyContent: "space-between", 
+                              alignItems: "flex-start", 
+                              marginBottom: isExpanded ? 8 : 4,
+                              cursor: "pointer"
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
+                              <span style={{ fontSize: 14, flexShrink: 0 }}>{fb.category === "bug" ? "🐛" : "💡"}</span>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: c.text, flexShrink: 0 }}>{fb.username}</span>
+                              <span style={{ fontSize: 10, color: c.sub, flexShrink: 0 }}>{timeAgo}</span>
+                              <span style={{ fontSize: 11, color: c.sub, marginLeft: 4, flexShrink: 0 }}>{isExpanded ? "▼" : "▶"}</span>
+                            </div>
+                            <div style={{ display: "flex", gap: 4, flexShrink: 0, marginLeft: 8 }}>
+                              {/* Status badges */}
+                              {fb.status === "new" && (
+                                <span style={{ fontSize: 9, background: c.accent + "33", color: c.accent, borderRadius: 6, padding: "2px 6px", fontWeight: 700 }}>NEW</span>
+                              )}
+                              {fb.status === "reviewed" && (
+                                <span style={{ fontSize: 9, background: "#30D15833", color: "#30D158", borderRadius: 6, padding: "2px 6px", fontWeight: 700 }}>REVIEWED</span>
+                              )}
+                              {fb.status === "resolved" && (
+                                <span style={{ fontSize: 9, background: c.pill, color: c.sub, borderRadius: 6, padding: "2px 6px", fontWeight: 700 }}>RESOLVED</span>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Preview or Full Message */}
+                          <div 
+                            onClick={() => setExpandedFeedback(prev => ({ ...prev, [fb.id]: !isExpanded }))}
+                            style={{ 
+                              fontSize: 12, 
+                              color: isExpanded ? c.text : c.sub, 
+                              marginBottom: isExpanded ? 8 : 0, 
+                              lineHeight: 1.6, 
+                              whiteSpace: isExpanded ? "pre-wrap" : "normal",
+                              cursor: "pointer"
+                            }}
+                          >
+                            {isExpanded ? fb.message : preview}
+                          </div>
+                          
+                          {/* Actions - only visible when expanded */}
+                          {isExpanded && (
+                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", borderTop: `1px solid ${c.border}`, paddingTop: 8 }}>
+                              {fb.status === "new" && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); updateFeedbackStatus(fb.id, "reviewed"); }}
+                                  style={{ background: "#30D158", color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}
+                                >
+                                  ✓ Mark Reviewed
+                                </button>
+                              )}
+                              {fb.status === "reviewed" && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); updateFeedbackStatus(fb.id, "resolved"); }}
+                                  style={{ background: c.accent, color: c.adk, border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}
+                                >
+                                  ✓ Resolve
+                                </button>
+                              )}
+                              {fb.status !== "new" && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); updateFeedbackStatus(fb.id, "new"); }}
+                                  style={{ background: c.pill, color: c.sub, border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 10, cursor: "pointer" }}
+                                >
+                                  ↶ Reopen
+                                </button>
+                              )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); deleteFeedback(fb.id); }}
+                                style={{ background: "none", border: "none", color: "#FF453A", fontSize: 10, cursor: "pointer", padding: "4px 8px" }}
+                              >
+                                🗑 Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </Sect>
           </>
         )}
 
@@ -1512,6 +1807,107 @@ function SettingsView({
           ) : (
             <SettingsRow icon="🗑" label="清除飛行紀錄 Clear Logs" sub="刪除所有私人飛行紀錄" onClick={() => setConfirmClear(true)} c={c} danger />
           )}
+        </Sect>
+
+        {/* ── Feedback & Bug Reports ── */}
+        <Sect label="意見回饋 FEEDBACK" c={c}>
+          <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 16 }}>
+            <div style={{ fontSize: 12, color: c.sub, marginBottom: 12, lineHeight: 1.6 }}>
+              Found a bug? Have an idea to improve CrewLog? We'd love to hear from you!<br />
+              <span style={{ color: c.accent, fontWeight: 700 }}>發現問題或有改進建議？請告訴我們！</span>
+            </div>
+
+            {/* Category Selection */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button
+                onClick={() => setFeedbackCategory("bug")}
+                style={{
+                  flex: 1,
+                  background: feedbackCategory === "bug" ? "#FF453A22" : c.pill,
+                  border: `2px solid ${feedbackCategory === "bug" ? "#FF453A" : c.border}`,
+                  color: feedbackCategory === "bug" ? "#FF453A" : c.sub,
+                  borderRadius: 12,
+                  padding: "10px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                🐛 Bug Report
+              </button>
+              <button
+                onClick={() => setFeedbackCategory("suggestion")}
+                style={{
+                  flex: 1,
+                  background: feedbackCategory === "suggestion" ? c.accent + "22" : c.pill,
+                  border: `2px solid ${feedbackCategory === "suggestion" ? c.accent : c.border}`,
+                  color: feedbackCategory === "suggestion" ? c.accent : c.sub,
+                  borderRadius: 12,
+                  padding: "10px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                💡 Suggestion
+              </button>
+            </div>
+
+            {/* Message Input */}
+            <ClearableTextarea
+              value={feedbackMessage}
+              onChange={e => { setFeedbackMessage(e.target.value); setFeedbackError(""); }}
+              rows={4}
+              placeholder={feedbackCategory === "bug" 
+                ? "Describe the bug: What happened? What did you expect? Steps to reproduce...\n描述問題：發生了什麼？預期結果？重現步驟..." 
+                : "Share your idea: What would you like to see? How would it help?\n分享你的想法：你希望看到什麼功能？它會如何幫助你？"}
+              style={{
+                ...inp,
+                resize: "vertical",
+                marginBottom: feedbackError || feedbackSuccess ? 10 : 12,
+              }}
+              c={c}
+            />
+
+            {/* Error/Success Messages */}
+            {feedbackError && (
+              <div style={{ color: "#FF453A", fontSize: 12, marginBottom: 10, padding: "8px 12px", background: "#FF453A11", borderRadius: 8, border: "1px solid #FF453A44" }}>
+                {feedbackError}
+              </div>
+            )}
+            {feedbackSuccess && (
+              <div style={{ color: "#30D158", fontSize: 12, marginBottom: 10, padding: "8px 12px", background: "#30D15811", borderRadius: 8, border: "1px solid #30D15844" }}>
+                {feedbackSuccess}
+              </div>
+            )}
+
+            {/* Submit Button */}
+            <button
+              onClick={submitFeedback}
+              disabled={feedbackSubmitting || !feedbackMessage.trim()}
+              style={{
+                width: "100%",
+                background: feedbackSubmitting || !feedbackMessage.trim() ? c.pill : c.accent,
+                color: feedbackSubmitting || !feedbackMessage.trim() ? c.sub : c.adk,
+                border: "none",
+                borderRadius: 12,
+                padding: "12px",
+                fontSize: 14,
+                fontWeight: 800,
+                cursor: feedbackSubmitting || !feedbackMessage.trim() ? "not-allowed" : "pointer",
+                fontFamily: "inherit",
+                opacity: feedbackSubmitting || !feedbackMessage.trim() ? 0.5 : 1,
+              }}
+            >
+              {feedbackSubmitting ? "發送中..." : feedbackCategory === "bug" ? "📤 Submit Bug Report" : "📤 Submit Suggestion"}
+            </button>
+          </div>
+        </Sect>
+
+        {/* ── Logout ── */}
+        <Sect label="帳號 ACCOUNT" c={c}>
           <div style={{ marginTop: 4 }}>
             <SettingsRow icon="🚪" label="登出 Logout" sub={`目前登入：${username}`} onClick={onLogout} c={c} danger />
           </div>
