@@ -825,6 +825,8 @@ function SettingsView({
   const [showAllFeedback,  setShowAllFeedback]  = useState(false); // expand/collapse all
   // Clock ticker for live time updates
   const [currentTime,      setCurrentTime]      = useState(Date.now());
+  // Usage tracking (admin-only — no private content)
+  const [usageData,        setUsageData]        = useState({});
 
   const isAdmin = username === "adminsetup";
 
@@ -860,6 +862,22 @@ function SettingsView({
       })
       .catch(() => {})
       .finally(() => setAccsLoading(false));
+    
+    // Add real-time listener for usage data (admin activity monitor)
+    const unsubUsage = onSnapshot(USAGE_DOC, (snap) => {
+      if (snap.exists()) {
+        setUsageData(snap.data().usage || {});
+      } else {
+        setUsageData({});
+      }
+    }, () => {
+      // Error handler - fail silently
+      setUsageData({});
+    });
+    
+    return () => {
+      unsubUsage();
+    };
   }, []);
   
   // ── Load feedback for admin ────────────────────────────────────────────
