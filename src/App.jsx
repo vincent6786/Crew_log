@@ -806,8 +806,7 @@ function SettingsView({
   const [changePwConf,   setChangePwConf]   = useState("");
   const [changePwErr,    setChangePwErr]    = useState("");
   const [changePwOk,     setChangePwOk]     = useState("");
-  // Usage tracking (admin-only — no private content)
-  const [usageData,        setUsageData]        = useState({});
+  // Admin settings state
   const [regOpen,          setRegOpen]          = useState(false);   // local copy of toggle
   const [regOpenLoading,   setRegOpenLoading]   = useState(false);
   const [showAcStats,      setShowAcStats]      = useState(true);    // aircraft stats visible
@@ -824,6 +823,8 @@ function SettingsView({
   const [feedbackLoading,  setFeedbackLoading]  = useState(false);
   const [expandedFeedback, setExpandedFeedback] = useState({});  // { feedbackId: true/false }
   const [showAllFeedback,  setShowAllFeedback]  = useState(false); // expand/collapse all
+  // Clock ticker for live time updates
+  const [currentTime,      setCurrentTime]      = useState(Date.now());
 
   const isAdmin = username === "adminsetup";
 
@@ -844,7 +845,7 @@ function SettingsView({
     width:        "100%",
   };
 
-  // ── Load accounts + usage + appSettings from Firestore on mount ────────────────
+  // ── Load accounts + appSettings from Firestore on mount ──────────────────────
   useEffect(() => {
     // Load accounts and settings once
     Promise.all([getDoc(ACCOUNTS_DOC), getDoc(APP_SETTINGS_DOC)])
@@ -859,22 +860,6 @@ function SettingsView({
       })
       .catch(() => {})
       .finally(() => setAccsLoading(false));
-    
-    // Add real-time listener for usage data (admin activity monitor)
-    const unsubUsage = onSnapshot(USAGE_DOC, (snap) => {
-      if (snap.exists()) {
-        setUsageData(snap.data().usage || {});
-      } else {
-        setUsageData({});
-      }
-    }, () => {
-      // Error handler - fail silently
-      setUsageData({});
-    });
-    
-    return () => {
-      unsubUsage();
-    };
   }, []);
   
   // ── Load feedback for admin ────────────────────────────────────────────
@@ -901,6 +886,16 @@ function SettingsView({
       unsubFeedback();
     };
   }, [isAdmin]);
+  
+  // ── Update clock every minute for live relative time display ─────────────
+  useEffect(() => {
+    // Update currentTime every minute to refresh relative timestamps
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 60000); // 60 seconds
+    
+    return () => clearInterval(interval);
+  }, []);
 
   /** Add a new account to Firestore */
   const addAccount = async () => {
@@ -1536,8 +1531,8 @@ function SettingsView({
                       const lastLogin = stat.lastLogin
                         ? (() => {
                             const d = new Date(stat.lastLogin);
-                            const now = new Date();
-                            const diffMs = now - d;
+                            const now = currentTime; // Use currentTime for live updates
+                            const diffMs = now - d.getTime();
                             const diffMins = Math.floor(diffMs / 60000);
                             const diffHours = Math.floor(diffMs / 3600000);
                             const diffDays = Math.floor(diffMs / 86400000);
@@ -1555,7 +1550,7 @@ function SettingsView({
                         : "—";
                       const flights   = stat.flightCount ?? "—";
                       const daysAgo   = stat.lastLogin
-                        ? Math.floor((Date.now() - new Date(stat.lastLogin)) / 86400000)
+                        ? Math.floor((currentTime - new Date(stat.lastLogin).getTime()) / 86400000)
                         : null;
                       const inactive  = daysAgo !== null && daysAgo > 30;
                       return (
@@ -1699,7 +1694,7 @@ function SettingsView({
                       const isExpanded = expandedFeedback[fb.id] || false;
                       const preview = fb.message.length > 80 ? fb.message.slice(0, 80) + "..." : fb.message;
                       const timeAgo = (() => {
-                        const diffMs = Date.now() - new Date(fb.timestamp);
+                        const diffMs = currentTime - new Date(fb.timestamp).getTime();
                         const diffMins = Math.floor(diffMs / 60000);
                         const diffHours = Math.floor(diffMs / 3600000);
                         const diffDays = Math.floor(diffMs / 86400000);
@@ -2677,6 +2672,9 @@ export default function App() {
   const [notifications,     setNotifications]     = useState([]);
   const [showNotification,  setShowNotification]  = useState(false);
   const [currentNotif,      setCurrentNotif]      = useState(null);
+  
+  // ── §13.9.2  Clock ticker for live time updates ──────────────────────────
+  const [currentTime,       setCurrentTime]       = useState(Date.now());
 
   // ── §13.10  User preferences (persisted to localStorage) ──────────────────
   const [customTags, setCustomTags] = useState(() => {
@@ -2809,6 +2807,15 @@ export default function App() {
     
     return () => unsubNotif();
   }, [authStep, username, showNotification]);
+  
+  // ── Update clock every minute for live relative time display ─────────────
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 60000); // Update every 60 seconds
+    
+    return () => clearInterval(interval);
+  }, []);
 
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -4068,7 +4075,7 @@ export default function App() {
                           {recent.map(([user, vote]) => {
                             const si = STATUS_MAP[vote.color];
                             const timeAgo = (() => {
-                              const diffMs = Date.now() - new Date(vote.timestamp);
+                              const diffMs = currentTime - new Date(vote.timestamp).getTime();
                               const diffMins = Math.floor(diffMs / 60000);
                               const diffHours = Math.floor(diffMs / 3600000);
                               const diffDays = Math.floor(diffMs / 86400000);
