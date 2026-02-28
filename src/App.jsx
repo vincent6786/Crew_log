@@ -193,6 +193,12 @@ const APP_SETTINGS_DOC = doc(db, "crewlog", "appSettings");
  */
 const FEEDBACK_DOC = doc(db, "crewlog", "feedback");
 
+/**
+ * Notifications for users when their feedback is resolved.
+ * Shape: { notifications: [ { id, username, feedbackId, message, category, timestamp, seen } ] }
+ */
+const NOTIFICATIONS_DOC = doc(db, "crewlog", "notifications");
+
 /** Per-user private Firestore document — holds flights[] visible only to owner. */
 const flightDoc = (username) => doc(db, "crewlog", `flights-${username}`);
 
@@ -1064,8 +1070,30 @@ function SettingsView({
     try {
       const snap = await getDoc(FEEDBACK_DOC);
       const allFeedback = snap.exists() ? (snap.data().feedback || []) : [];
+      const feedbackItem = allFeedback.find(f => f.id === feedbackId);
       const updated = allFeedback.map(f => f.id === feedbackId ? { ...f, status: newStatus } : f);
       await setDoc(FEEDBACK_DOC, { feedback: updated });
+      
+      // If resolving feedback, create a notification for the user
+      if (newStatus === "resolved" && feedbackItem) {
+        const notifSnap = await getDoc(NOTIFICATIONS_DOC);
+        const existingNotifs = notifSnap.exists() ? (notifSnap.data().notifications || []) : [];
+        
+        // Create notification
+        const notification = {
+          id: mkId(),
+          username: feedbackItem.username,
+          feedbackId: feedbackId,
+          category: feedbackItem.category,
+          message: feedbackItem.message,
+          timestamp: new Date().toISOString(),
+          seen: false
+        };
+        
+        await setDoc(NOTIFICATIONS_DOC, {
+          notifications: [...existingNotifs, notification]
+        });
+      }
     } catch (error) {
       console.error("Failed to update feedback status:", error);
     }
@@ -2308,7 +2336,7 @@ function GuideView({ onBack, c }) {
     },
     {
       emoji: "👤", title: "組員頁面", en: "Crew Profile",
-      content: "點任何組員可以進入個人頁面：\n• 查看你們所有的合飛紀錄\n• 編輯組員基本資料（大家共享）\n• 新增長期筆記（大家共享）\n• 快速設定紅黃綠燈\n• 編輯或刪除個別飛行紀錄",
+      content: "點任何組員可以進入個人頁面：\n• 查看你們所有的合飛紀錄\n• 編輯組員基本資料（大家共享）\n• 新增公開筆記（大家共享）\n• 快速設定紅黃綠燈\n• 編輯或刪除個別飛行紀錄",
     },
     {
       emoji: "⬇", title: "備份資料", en: "Backup",
@@ -2644,6 +2672,11 @@ export default function App() {
   const [confirmDel,     setConfirmDel]     = useState(null);  // flight id pending delete
   const [confirmDelCrew, setConfirmDelCrew] = useState(false);
   const [showVoteStats,  setShowVoteStats]  = useState(false);  // toggle vote breakdown panel
+  
+  // ── §13.9.1  Notifications (resolved feedback popup) ──────────────────────
+  const [notifications,     setNotifications]     = useState([]);
+  const [showNotification,  setShowNotification]  = useState(false);
+  const [currentNotif,      setCurrentNotif]      = useState(null);
 
   // ── §13.10  User preferences (persisted to localStorage) ──────────────────
   const [customTags, setCustomTags] = useState(() => {
@@ -2752,6 +2785,30 @@ export default function App() {
     if (isRemoteFlights.current) { isRemoteFlights.current = false; return; }
     setDoc(flightDoc(username), { flights }).catch(() => setSyncStatus("error"));
   }, [flights, ready, authStep, username]);
+  
+  // ── Load notifications and show popup for unseen resolved feedback ────────
+  useEffect(() => {
+    if (authStep !== "app" || !username) return;
+    
+    const unsubNotif = onSnapshot(NOTIFICATIONS_DOC, (snap) => {
+      if (snap.exists()) {
+        const allNotifs = snap.data().notifications || [];
+        // Get notifications for this user that haven't been seen
+        const myNotifs = allNotifs.filter(n => n.username === username && !n.seen);
+        setNotifications(myNotifs);
+        
+        // Show popup for the first unseen notification
+        if (myNotifs.length > 0 && !showNotification) {
+          setCurrentNotif(myNotifs[0]);
+          setShowNotification(true);
+        }
+      }
+    }, () => {
+      // Error handler
+    });
+    
+    return () => unsubNotif();
+  }, [authStep, username, showNotification]);
 
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -3029,6 +3086,37 @@ export default function App() {
     if (Array.isArray(data.flights))                        setFlights(data.flights);
     if (Array.isArray(data.customTags))                     setCustomTags(data.customTags);
   }, []);
+  
+  /** Mark a notification as seen (won't show popup again) */
+  const markNotificationAsSeen = async (notificationId) => {
+    try {
+      const snap = await getDoc(NOTIFICATIONS_DOC);
+      if (!snap.exists()) return;
+      
+      const allNotifs = snap.data().notifications || [];
+      const updated = allNotifs.map(n => n.id === notificationId ? { ...n, seen: true } : n);
+      
+      await setDoc(NOTIFICATIONS_DOC, { notifications: updated });
+      
+      // Close modal and check if there are more unseen notifications
+      setShowNotification(false);
+      setCurrentNotif(null);
+      
+      // After a delay, check for next notification
+      setTimeout(() => {
+        const remaining = notifications.filter(n => n.id !== notificationId);
+        if (remaining.length > 0) {
+          setCurrentNotif(remaining[0]);
+          setShowNotification(true);
+        }
+      }, 500);
+    } catch (error) {
+      console.error("Failed to mark notification as seen:", error);
+      // Still close the modal on error
+      setShowNotification(false);
+      setCurrentNotif(null);
+    }
+  };
 
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -4068,7 +4156,7 @@ export default function App() {
           {/* Long-term notes (shared) */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 9, letterSpacing: 3, color: c.sub, fontWeight: 700, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>長期筆記 NOTES</span>
+              <span>公開筆記 PUBLIC NOTES</span>
               <button
                 onClick={() => {
                   if (editNotes) { patchCrew(m.id, { notes: tempNotes }); setEditNotes(false); }
@@ -4270,6 +4358,108 @@ export default function App() {
             setRoutes={setRoutes}
             flights={flights}
           />
+        )}
+
+        {/* ── Notification Modal (Feedback Resolved) ── */}
+        {showNotification && currentNotif && (
+          <div 
+            style={{
+              position: "fixed",
+              top: 0, left: 0, right: 0, bottom: 0,
+              background: "rgba(0,0,0,0.85)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "20px",
+              zIndex: 9999,
+            }}
+            onClick={() => markNotificationAsSeen(currentNotif.id)}
+          >
+            <div 
+              style={{
+                background: c.card,
+                borderRadius: 20,
+                padding: "24px",
+                maxWidth: 380,
+                width: "100%",
+                border: `2px solid ${c.accent}`,
+                boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div style={{ textAlign: "center", marginBottom: 20 }}>
+                <div style={{ fontSize: 48, marginBottom: 8 }}>
+                  {currentNotif.category === "bug" ? "🎉" : "✨"}
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: c.text, marginBottom: 4 }}>
+                  {currentNotif.category === "bug" ? "Bug Fixed!" : "Suggestion Implemented!"}
+                </div>
+                <div style={{ fontSize: 12, color: c.sub }}>
+                  感謝你的回饋 · Thank you for your feedback!
+                </div>
+              </div>
+
+              {/* Original Message */}
+              <div style={{
+                background: c.cardAlt,
+                border: `1px solid ${c.border}`,
+                borderRadius: 12,
+                padding: "12px 14px",
+                marginBottom: 20,
+              }}>
+                <div style={{ fontSize: 10, color: c.sub, marginBottom: 6, fontWeight: 700, letterSpacing: 1 }}>
+                  YOUR {currentNotif.category === "bug" ? "BUG REPORT" : "SUGGESTION"}
+                </div>
+                <div style={{ fontSize: 13, color: c.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                  {currentNotif.message.length > 120 
+                    ? currentNotif.message.slice(0, 120) + "..." 
+                    : currentNotif.message}
+                </div>
+              </div>
+
+              {/* Message */}
+              <div style={{
+                background: `${c.accent}11`,
+                border: `1px solid ${c.accent}44`,
+                borderRadius: 12,
+                padding: "12px 14px",
+                marginBottom: 20,
+              }}>
+                <div style={{ fontSize: 13, color: c.text, lineHeight: 1.6 }}>
+                  {currentNotif.category === "bug" 
+                    ? "We've fixed this issue! The app should now work as expected. Thank you for helping us improve CrewLog! 🚀"
+                    : "We've implemented your suggestion! Check it out in the app. Thank you for helping us make CrewLog better! 🌟"}
+                </div>
+              </div>
+
+              {/* Additional notifications indicator */}
+              {notifications.length > 1 && (
+                <div style={{ fontSize: 11, color: c.sub, textAlign: "center", marginBottom: 16 }}>
+                  +{notifications.length - 1} more notification{notifications.length - 1 !== 1 ? 's' : ''} waiting
+                </div>
+              )}
+
+              {/* Close Button */}
+              <button
+                onClick={() => markNotificationAsSeen(currentNotif.id)}
+                style={{
+                  width: "100%",
+                  background: c.accent,
+                  color: c.adk,
+                  border: "none",
+                  borderRadius: 14,
+                  padding: "14px",
+                  fontSize: 15,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                Got it! ✓
+              </button>
+            </div>
+          </div>
         )}
 
       </div>
